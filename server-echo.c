@@ -25,16 +25,16 @@ int main() {
         perror("setsockopt");
         exit(EXIT_FAILURE);
     }
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons( PORT );
+    address.sin_family = AF_INET; //dir IP
+    address.sin_addr.s_addr = INADDR_ANY; //cuando hace el bind lo hace en todas las interfaces de la pc
+    address.sin_port = htons( PORT ); //podría ir 0 y es un puerto al azar (usualmente en el cliente)
 
     // Forcefully attaching socket to the port 8080
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address))<0) {
         perror("bind failed");
         exit(EXIT_FAILURE);
     }
-    if (listen(server_fd, 3) < 0) {
+    if (listen(server_fd, 3) < 0) { //el 3 es cola de espera hasta 3
         perror("listen");
         exit(EXIT_FAILURE);
     }
@@ -57,11 +57,7 @@ int main() {
         }
         printf("Received: %s\n", buffer);
         
-        if (strcmp(buffer, "disconnect") == 0) {
-            printf("Disconnecting from client...\n");
-            break; // Salir del bucle para cerrar la conexión
-        }
-        
+       
         send(new_socket, buffer, strlen(buffer), 0);
         printf("Sent: %s\n", buffer);
     }
