@@ -12,8 +12,21 @@ LIST=$(addprefix $(BIN)/, $(PROGS))
 server-tftp: server-tftp.c 
 	$(CC) -o bin/$@ $^ $(CFLAGS)
 
+client-tftp: client-tftp.c 
+	$(CC) -o bin/$@ $^ $(CFLAGS)
+
 server-chat: server-chat.c 
 	$(CC) -o bin/$@ $^ $(CFLAGS)
+
+client-chat: client-chat.c 
+	$(CC) -o bin/$@ $^ $(CFLAGS)
+
+server-echo: server-echo.c 
+	$(CC) -o bin/$@ $^ $(CFLAGS)
+
+client-echo: client-echo.c 
+	$(CC) -o bin/$@ $^ $(CFLAGS)
+
 
 .PHONY: clean
 clean:

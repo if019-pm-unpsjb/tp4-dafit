@@ -8,14 +8,14 @@
 #define BUFFER_SIZE 1024
 
 int main() {
-    int server_fd;
-    struct sockaddr_in address, client_address;
+    int server_fd, new_socket;
+    struct sockaddr_in address;
     int opt = 1;
-    int client_addrlen = sizeof(client_address);
+    int addrlen = sizeof(address);
     char buffer[BUFFER_SIZE] = {0};
 
     // Creating socket file descriptor
-    if ((server_fd = socket(AF_INET, SOCK_DGRAM, 0)) == 0) {
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
@@ -34,28 +34,37 @@ int main() {
         perror("bind failed");
         exit(EXIT_FAILURE);
     }
+    if (listen(server_fd, 3) < 0) { //el 3 es cola de espera hasta 3
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+    if ((new_socket = accept(server_fd, (struct sockaddr *)&address,
+                       (socklen_t*)&addrlen))<0) {
+        perror("accept");
+        exit(EXIT_FAILURE);
+    }
 
-    //short cont;
-    //buffer[2] = cont >> 8;
-    //buffer[3] = cont & 00FF
+    // Mensaje de conexión establecida
+    char *connection_message = "Connection established. Type 'disconnect' to close connection.\n";
+    send(new_socket , connection_message , strlen(connection_message) , 0 );
 
     while(1) {
         memset(buffer, 0, BUFFER_SIZE);
-        int valread = recvfrom(server_fd, &buffer[4], BUFFER_SIZE, 0, (struct sockaddr *)&client_address, (socklen_t*)&client_addrlen);
+        int valread = read(new_socket, buffer, BUFFER_SIZE - 1);
         if (valread == -1) {
-            perror("recvfrom");
+            perror("read");
             exit(EXIT_FAILURE);
         }
-        buffer[valread] = '\0'; // Asegurarse de que la cadena esté terminada en nulo
         printf("Received: %s\n", buffer);
         
        
-        sendto(server_fd, buffer, strlen(buffer), 0, (struct sockaddr *)&client_address, client_addrlen);
+        send(new_socket, buffer, strlen(buffer), 0);
         printf("Sent: %s\n", buffer);
     }
 
     // Cerrar el socket después de salir del bucle
-    close(server_fd);
+    close(new_socket);
 
     return 0;
 }
+
