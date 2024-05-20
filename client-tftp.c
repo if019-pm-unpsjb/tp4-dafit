@@ -117,6 +117,7 @@ void handle_data(int sock, struct sockaddr_in *server_addr, socklen_t server_add
             *(uint16_t *)ack = htons(OPCODE_ACK);
             *(uint16_t *)(ack + 2) = htons(block_number);
             sendto(sock, ack, 4, 0, (struct sockaddr *)server_addr, server_addrlen);
+            printf("Sent ACK for block number: %d\n", block_number); // Añadido para depuración
 
             block_number++;
 
@@ -189,6 +190,8 @@ void handle_ack(int sock, struct sockaddr_in *server_addr, socklen_t server_addr
             close(file_fd);
             return;
         }
+
+        printf("Received ACK for block number: %d\n", ack_block_number);
 
         if (bytes_read < MESSAGE_SIZE) {
             // Último paquete

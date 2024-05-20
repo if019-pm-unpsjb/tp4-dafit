@@ -114,10 +114,15 @@ void handle_rrq(int sock, struct sockaddr_in *client_addr, socklen_t client_addr
         printf("Sent block number: %d\n", block_number);  // Añadido para depuración
 
         // Recibir ACK
-        char ack_packet[4];
-        recvfrom(sock, ack_packet, sizeof(ack_packet), 0,(struct sockaddr *)client_addr, &client_addrlen);
-        int ack_opcode = ntohs(*(uint16_t *)ack_packet);
-        int ack_block = ntohs(*(uint16_t *)(ack_packet + 2));
+        ssize_t ack_len = recvfrom(sock, data_packet, BUFFER_SIZE, 0, (struct sockaddr *)client_addr, &client_addrlen);
+        if (ack_len == -1){
+            perror("recvfrom");
+            close(file_fd);
+            return;
+        }
+
+        int ack_opcode = ntohs(*(uint16_t *)data_packet);
+        int ack_block = ntohs(*(uint16_t *)(data_packet + 2));
 
         if (ack_opcode != OPCODE_ACK || ack_block != block_number){
             send_error(sock, client_addr, client_addrlen, 0, "Unknown error. :c");
@@ -125,6 +130,7 @@ void handle_rrq(int sock, struct sockaddr_in *client_addr, socklen_t client_addr
             return;
         }
 
+        printf("Received ACK for block number: %d\n", ack_block); // Añadido para depuración
         block_number++;
         // recvfrom(sock, data_packet, BUFFER_SIZE, 0, (struct sockaddr *)client_addr, &client_addrlen);
         // int ack_opcode = ntohs(*(uint16_t *)data_packet);
@@ -177,6 +183,7 @@ void handle_wrq(int sock, struct sockaddr_in *client_addr, socklen_t client_addr
             printf("...");
 
             send_ack(sock, client_addr, client_addrlen, block_number);
+            printf("Sent ACK for block number: %d\n", block_number);
 
             block_number++;
 
@@ -214,4 +221,5 @@ void send_ack(int sock, struct sockaddr_in *client_addr, socklen_t client_addrle
     *(uint16_t *)(ack + 2) = htons(block_number);
 
     sendto(sock, ack, 4, 0, (struct sockaddr *)client_addr, client_addrlen);
+    printf("Sent ACK for block number: %d\n", block_number); // Añadido para depuración
 }
