@@ -156,7 +156,7 @@ void handle_data(int sock, struct sockaddr_in *server_addr, socklen_t server_add
         return;
     }
 
-    printf("Receiving data:");
+    printf("Recibiendo datos:");
     while (1) {
         bytes_received = recvfrom(sock, buffer, BUFFER_SIZE, 0, (struct sockaddr *)server_addr, &server_addrlen);
         if (bytes_received == -1) {
@@ -173,7 +173,7 @@ void handle_data(int sock, struct sockaddr_in *server_addr, socklen_t server_add
             printf("...");
 
             send_ack(sock, server_addr, server_addrlen, block_number);
-            printf("Sent ACK for block number: %d\n", block_number);
+            printf("Enviando ACK de bloque: %d\n", block_number);
 
             block_number++;
 
@@ -182,11 +182,11 @@ void handle_data(int sock, struct sockaddr_in *server_addr, socklen_t server_add
                 break;
             }
         } else if (opcode == OPCODE_ERROR) {
-            printf("Error from server: %s\n", buffer + 4);
+            printf("Error del servidor: %s\n", buffer + 4);
             close(file_fd);
             return;
         } else {
-            printf("Protocol error: expected DATA block %d\n", block_number);
+            printf("Error de protocolo: se esperaba bloque de DATOS: %d\n", block_number);
             close(file_fd);
             return;
         }
