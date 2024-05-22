@@ -29,14 +29,14 @@ int main()
     char buffer[BUFFER_SIZE] = {0};
     int opt = 1;
 
-    // Creating socket file descriptor
+    // Abrir socket.
     if ((server_fd = socket(AF_INET, SOCK_DGRAM, 0)) == 0)
     {
-        perror("socket failed");
+        perror("socket");
         exit(EXIT_FAILURE);
     }
 
-    // Forcefully attaching socket to the port 8080
+    // Asignar un puerto al socket.
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)))
     {
         perror("setsockopt");
@@ -47,10 +47,10 @@ int main()
     address.sin_addr.s_addr = htons(INADDR_ANY); // cuando hace el bind lo hace en todas las interfaces de la pc
     address.sin_port = htons(PORT);       // podría ir 0 y es un puerto al azar (usualmente en el cliente)
 
-    // Forcefully attaching socket to the port 8080
+    // Realizar bind.
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
     {
-        perror("bind failed");
+        perror("bind");
         exit(EXIT_FAILURE);
     }
 
@@ -70,18 +70,18 @@ int main()
         {
         case OPCODE_RRQ:
             char *filename1 = buffer + 2;
-            printf("Received reading request: %s\n", filename1);
+            printf("Recibí solicitud de lectura del archivo: %s\n", filename1);
             handle_rrq(server_fd, &client_address, client_addrlen, filename1);
             break;
 
         case OPCODE_WRQ:
             char *filename2 = buffer + 2;
-            printf("Received writing request: %s\n", filename2);
+            printf("Recibí solicitud de escritura del archivo: %s\n", filename2);
             handle_wrq(server_fd, &client_address, client_addrlen, filename2);
             break;
 
         default:
-            send_error(server_fd, &client_address, client_addrlen, 4, "Illegal TFTP operation.");
+            send_error(server_fd, &client_address, client_addrlen, 4, "Código de Operación inválido.");
         }
     }
 
@@ -96,32 +96,33 @@ void handle_rrq(int sock, struct sockaddr_in *client_addr, socklen_t client_addr
     char filepath[BUFFER_SIZE];
     snprintf(filepath, sizeof(filepath), "server_files/%s", filename);
 
-    printf("Trying to open file: %s\n", filepath);
+    printf("Abriendo archivo: %s\n", filepath);
     int file_fd = open(filepath, O_RDONLY);
 
     if (file_fd < 0)
     {
         perror("open");
-        send_error(sock, client_addr, client_addrlen, 1, "File not found.");
+        send_error(sock, client_addr, client_addrlen, 1, "No se encontró el archivo.");
         return;
     }
 
-    printf("File opened successfully: %s\n", filepath);
+    printf("Se abrió el archivo: %s\n", filepath);
     char buffer[BUFFER_SIZE];
     char data_packet[BUFFER_SIZE];
     int block_number = 1;
-    ssize_t bytes_read;
+    ssize_t bytes_read;     
 
     while ((bytes_read = read(file_fd, buffer, MESSAGE_SIZE)) >= 0)
     {
-        printf("Bytes read: %zd\n", bytes_read); // Añadido para depuración
-
+   
         if (bytes_read == 0)
         {
             // Llegó al final del archivo
-            printf("End of file reached.\n");
+            printf("Se llegó al fin del archivo.\n");
             break;
         }
+
+        printf("Bytes leidos: %zd\n", bytes_read);
 
         memset(data_packet, 0, BUFFER_SIZE);
         *(uint16_t *)data_packet = htons(OPCODE_DATA);
@@ -129,20 +130,20 @@ void handle_rrq(int sock, struct sockaddr_in *client_addr, socklen_t client_addr
         memcpy(data_packet + 4, buffer, bytes_read);
 
         sendto(sock, data_packet, bytes_read + 4, 0, (struct sockaddr *)client_addr, client_addrlen);
-        printf("Sent block number: %d\n", block_number); // Añadido para depuración
+        printf("Bloques enviados: %d\n", block_number);
 
         // Recibir ACK
         if (!recieve_ack(sock, client_addr, client_addrlen, block_number)) {
-            send_error(sock, client_addr, client_addrlen, 0, "Unknown error.");
+            send_error(sock, client_addr, client_addrlen, 0, "Error.");
             close(file_fd);
             return;
         }
 
-        printf("Received ACK for block number: %d\n", block_number); // Añadido para depuración
+        printf("Recibiendo ACK de bloque: %d\n", block_number);
         block_number++;
     }
 
-    printf("File send completed.\n"); // Añadido para depuración
+    printf("El archivo completo fue enviado.\n");
     close(file_fd);
 }
 
@@ -151,13 +152,13 @@ void handle_wrq(int sock, struct sockaddr_in *client_addr, socklen_t client_addr
     char filepath[BUFFER_SIZE];
     snprintf(filepath, sizeof(filepath), "server_files/%s", filename);
 
-    printf("Trying to open file for writing: %s\n", filepath);
+    printf("Creando archivo: %s\n", filepath);
     int file_fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 
     if (file_fd < 0)
     {
         perror("open");
-        send_error(sock, client_addr, client_addrlen, 1, "Cannot create file.");
+        send_error(sock, client_addr, client_addrlen, 1, "No se pudo crear archivo.");
         return;
     }
 
@@ -167,7 +168,7 @@ void handle_wrq(int sock, struct sockaddr_in *client_addr, socklen_t client_addr
     int block_number = 1;
     ssize_t bytes_received;
 
-    printf("Receiving data:");
+    printf("Recibiendo datos:");
     
     while (1)
     {
@@ -188,8 +189,6 @@ void handle_wrq(int sock, struct sockaddr_in *client_addr, socklen_t client_addr
             printf("...");
 
             send_ack(sock, client_addr, client_addrlen, block_number);
-            printf("Sent ACK for block number: %d\n", block_number);
-
             block_number++;
 
             if (bytes_received < MESSAGE_SIZE + 4)
@@ -200,20 +199,20 @@ void handle_wrq(int sock, struct sockaddr_in *client_addr, socklen_t client_addr
         }
         else if (opcode == OPCODE_ERROR)
         {
-            printf("Error from client: %s\n", buffer + 4);
+            printf("Error del cliente: %s\n", buffer + 4);
             close(file_fd);
             return;
         }
         else
         {
-            printf("Protocol error: expected DATA block %d\n", block_number);
+            printf("Error de protocolo, se esperaba bloque de datos: %d\n", block_number);
             close(file_fd);
             return;
         }
     }
 
     close(file_fd);
-    printf("\nFile transfer completed\n");
+    printf("Se recibió el archivo completo.\n");
 }
 
 void send_error(int sock, struct sockaddr_in *client_addr, socklen_t client_addrlen, int error_code, char *error_msg)
@@ -233,7 +232,7 @@ void send_ack(int sock, struct sockaddr_in *client_addr, socklen_t client_addrle
     *(uint16_t *)(ack + 2) = htons(block_number);
 
     sendto(sock, ack, 4, 0, (struct sockaddr *)client_addr, client_addrlen);
-    printf("Sent ACK for block number: %d\n", block_number); // Añadido para depuración
+    printf("Enviando ACK de bloque: %d\n", block_number);
 }
 
 

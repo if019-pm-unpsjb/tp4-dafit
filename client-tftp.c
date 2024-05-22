@@ -23,7 +23,7 @@ int receive_ack(int sock, struct sockaddr_in *server_addr, socklen_t server_addr
 
 int main(int argc, char const *argv[]) {
     if (argc != 5) {
-        printf("Usage: %s <rrq/wrq> <filename>\n", argv[0]);
+        printf("El comando debe ser: %s <IP> <PUERTO> <rrq/wrq> <filename>\n", argv[0]);
         return -1;
     }
     //client ip puerto cm archivo
@@ -38,7 +38,7 @@ int main(int argc, char const *argv[]) {
     socklen_t addr_len = sizeof(serv_addr);
 
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        perror("Socket creation error");
+        perror("socket");
         return -1;
     }
 
@@ -57,7 +57,7 @@ int main(int argc, char const *argv[]) {
     } else if (strcmp(operation, "wrq") == 0) {
         send_wrq(sock, &serv_addr, addr_len, filename, mode);
     } else {
-        printf("Invalid operation. Use 'rrq' for read request or 'wrq' for write request.\n");
+        printf("Error en el Códifo de Operación.\n");
         return -1;
     }
 
@@ -87,7 +87,7 @@ void send_wrq(int sock, struct sockaddr_in *server_addr, socklen_t server_addrle
     sendto(sock, buffer, 2 + strlen(filename) + 1 + strlen(mode) + 1, 0, (struct sockaddr *)server_addr, server_addrlen);
 
     if (!receive_ack(sock, server_addr, server_addrlen, 0)) {
-        send_error(sock, server_addr, server_addrlen, 0, "Failed to receive initial ACK");
+        send_error(sock, server_addr, server_addrlen, 0, "No ser recibió el ACK inicial.");
         return;
     }
 
@@ -97,7 +97,7 @@ void send_wrq(int sock, struct sockaddr_in *server_addr, socklen_t server_addrle
     char filepath[BUFFER_SIZE];
     snprintf(filepath, sizeof(filepath), "client_files/%s", filename);
 
-    printf("Trying to open file: %s\n", filepath);
+    printf("Abriendo archivo: %s\n", filepath);
     int file_fd = open(filepath, O_RDONLY);
 
     if (file_fd < 0) {
@@ -105,7 +105,7 @@ void send_wrq(int sock, struct sockaddr_in *server_addr, socklen_t server_addrle
         return;
     }
 
-    printf("Sending data:");
+    printf("Enviando archivo:");
     while (1) {
         bytes_read = read(file_fd, buffer, MESSAGE_SIZE);
         if (bytes_read == -1) {
@@ -120,15 +120,15 @@ void send_wrq(int sock, struct sockaddr_in *server_addr, socklen_t server_addrle
         memcpy(data_packet + 4, buffer, bytes_read);
 
         sendto(sock, data_packet, bytes_read + 4, 0, (struct sockaddr *)server_addr, server_addrlen);
-        printf("Sent block number: %d\n", block_number);
+        printf("Enviando bloque: %d\n", block_number);
 
         if (!receive_ack(sock, server_addr, server_addrlen, block_number)) {
-            printf("Failed to receive ACK for block %d\n", block_number);
+            printf("Error al recibir ACK del bloque: %d\n", block_number);
             close(file_fd);
             return;
         }
 
-        printf("Received ACK for block number: %d\n", block_number);
+        printf("Recibendo ACK de bloque: %d\n", block_number);
 
         if (bytes_read < MESSAGE_SIZE) {
             // Último paquete
@@ -139,7 +139,7 @@ void send_wrq(int sock, struct sockaddr_in *server_addr, socklen_t server_addrle
     }
 
     close(file_fd);
-    printf("\nFile transfer completed\n");
+    printf("Transferencia completada.\n");
 }
 
 void handle_data(int sock, struct sockaddr_in *server_addr, socklen_t server_addrlen, const char *filename) {
@@ -193,7 +193,7 @@ void handle_data(int sock, struct sockaddr_in *server_addr, socklen_t server_add
     }
 
     close(file_fd);
-    printf("\nFile transfer completed\n");
+    printf("Transferencia completada.\n");
 }
 
 int receive_ack(int sock, struct sockaddr_in *server_addr, socklen_t server_addrlen, int expected_block_number) {
