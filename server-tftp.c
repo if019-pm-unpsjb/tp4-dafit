@@ -44,7 +44,7 @@ int main()
     }
 
     address.sin_family = AF_INET;         // dir IP
-    address.sin_addr.s_addr = INADDR_ANY; // cuando hace el bind lo hace en todas las interfaces de la pc
+    address.sin_addr.s_addr = htons(INADDR_ANY); // cuando hace el bind lo hace en todas las interfaces de la pc
     address.sin_port = htons(PORT);       // podría ir 0 y es un puerto al azar (usualmente en el cliente)
 
     // Forcefully attaching socket to the port 8080

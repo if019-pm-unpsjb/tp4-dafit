@@ -22,17 +22,19 @@ void send_ack(int sock, struct sockaddr_in *server_addr, socklen_t server_addrle
 int receive_ack(int sock, struct sockaddr_in *server_addr, socklen_t server_addrlen, int expected_block_number);
 
 int main(int argc, char const *argv[]) {
-    if (argc != 3) {
+    if (argc != 5) {
         printf("Usage: %s <rrq/wrq> <filename>\n", argv[0]);
         return -1;
     }
+    //client ip puerto cm archivo
 
-    const char *operation = argv[1];
-    const char *filename = argv[2];
+    const char *operation = argv[3];
+    const char *filename = argv[4];
     const char *mode = "octet";
 
     int sock;
     struct sockaddr_in serv_addr;
+    inet_aton(argv[1], &(serv_addr.sin_addr));
     socklen_t addr_len = sizeof(serv_addr);
 
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
@@ -42,9 +44,9 @@ int main(int argc, char const *argv[]) {
 
     memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(PORT);
+    serv_addr.sin_port = htons(atoi(argv[2]));
 
-    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, argv[2], (void*) &serv_addr.sin_addr) <= 0) {
         perror("Invalid address/ Address not supported");
         return -1;
     }
@@ -147,7 +149,6 @@ void handle_data(int sock, struct sockaddr_in *server_addr, socklen_t server_add
     char filepath[BUFFER_SIZE];
     snprintf(filepath, sizeof(filepath), "client_files/%s", filename);
 
-    printf("Trying to open file: %s\n", filepath);
     int file_fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 
     if (file_fd < 0) {
