@@ -46,8 +46,8 @@ int main(int argc, char const *argv[]) {
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(atoi(argv[2]));
 
-    if (inet_pton(AF_INET, argv[2], (void*) &serv_addr.sin_addr) <= 0) {
-        perror("Invalid address/ Address not supported");
+    if (inet_pton(AF_INET, argv[1], (void*) &serv_addr.sin_addr) <= 0) {
+        perror("inet_pton");
         return -1;
     }
 
