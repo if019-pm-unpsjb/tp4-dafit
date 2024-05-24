@@ -7,6 +7,7 @@
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
+#define NOMBRE_SIZE 4
 
 void *receive_messages(void *arg)
 {
@@ -17,24 +18,28 @@ void *receive_messages(void *arg)
     while ((bytes_received = recv(sock, buffer, BUFFER_SIZE, 0)) > 0)
     {
         buffer[bytes_received] = '\0';
-        printf("Mensaje del otro cliente: %s\n", buffer);
+        printf("%s\n", buffer);
     }
 
     return NULL;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-    if (argc != 3)
+    if (argc != 4)
     {
-        printf("El comando debe ser: %s <IP> <PUERTO>\n", argv[0]);
+        printf("El comando debe ser: %s <IP> <PUERTO> <NOMBRE\n", argv[0]);
+        printf("El nombre debe ser de maximo 4 letras\n");
         return -1;
     }
 
     int sock = 0;
     struct sockaddr_in serv_addr;
     char buffer[BUFFER_SIZE];
-    socklen_t addr_len = sizeof(serv_addr);
+    char nombre[NOMBRE_SIZE + 1];
+
+    strncpy(nombre, argv[3], NOMBRE_SIZE);
+    nombre[NOMBRE_SIZE] = '\0';
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
@@ -61,6 +66,9 @@ int main()
     }
 
     printf("Conectado al servidor\n");
+
+    // enviar el nombre al servidor
+    send(sock, nombre, strlen(nombre), 0);
 
     pthread_t thread_id;
     pthread_create(&thread_id, NULL, receive_messages, (void *)&sock);

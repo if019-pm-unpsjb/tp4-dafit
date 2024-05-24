@@ -231,6 +231,8 @@ void send_ack(int sock, struct sockaddr_in *client_addr, socklen_t client_addrle
     *(uint16_t *)ack = htons(OPCODE_ACK);
     *(uint16_t *)(ack + 2) = htons(block_number);
 
+    int randSleep = rand() % (2 + 1 - 0) + 0;
+    sleep(randSleep);
     sendto(sock, ack, 4, 0, (struct sockaddr *)client_addr, client_addrlen);
     printf("Enviando ACK de bloque: %d\n", block_number);
 }

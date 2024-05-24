@@ -119,6 +119,8 @@ void send_wrq(int sock, struct sockaddr_in *server_addr, socklen_t server_addrle
         *(uint16_t *)(data_packet + 2) = htons(block_number);
         memcpy(data_packet + 4, buffer, bytes_read);
 
+        // int randSleep = rand() % (2 + 1 - 0) + 0;
+        // sleep(randSleep);
         sendto(sock, data_packet, bytes_read + 4, 0, (struct sockaddr *)server_addr, server_addrlen);
         printf("Enviando bloque: %d\n", block_number);
 
