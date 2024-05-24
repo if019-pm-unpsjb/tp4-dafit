@@ -3,66 +3,73 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
-int main(int argc, char const *argv[])
+void *receive_messages(void *arg)
 {
+    int sock = *((int *)arg);
+    char buffer[BUFFER_SIZE];
+    int bytes_received;
+
+    while ((bytes_received = recv(sock, buffer, BUFFER_SIZE, 0)) > 0)
+    {
+        buffer[bytes_received] = '\0';
+        printf("Mensaje del otro cliente: %s\n", buffer);
+    }
+
+    return NULL;
+}
+
+int main()
+{
+    if (argc != 3)
+    {
+        printf("El comando debe ser: %s <IP> <PUERTO>\n", argv[0]);
+        return -1;
+    }
+
     int sock = 0;
     struct sockaddr_in serv_addr;
-    char buffer[BUFFER_SIZE] = {0};
-    char message[BUFFER_SIZE] = {0};
+    char buffer[BUFFER_SIZE];
+    socklen_t addr_len = sizeof(serv_addr);
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
-        printf("\nError al crear el socket \n");
+        perror("Error al crear el socket");
         return -1;
     }
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(PORT);
+    serv_addr.sin_port = htons(atoi(argv[2]));
 
-    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0)
+    if (inet_pton(AF_INET, argv[1], (void *)&serv_addr.sin_addr) <= 0)
     {
-        printf("\nDirección no válida o no soportada \n");
+        perror("Dirección inválida o no soportada");
+        close(sock);
         return -1;
     }
 
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
     {
-        printf("\nError de conexión \n");
+        perror("Error al conectar");
+        close(sock);
         return -1;
     }
 
+    printf("Conectado al servidor\n");
+
+    pthread_t thread_id;
+    pthread_create(&thread_id, NULL, receive_messages, (void *)&sock);
+
     while (1)
     {
-        printf("Ingrese mensaje: ");
-        fgets(message, BUFFER_SIZE, stdin);
-
-        size_t len = strlen(message);
-        if (len > 0 && message[len - 1] == '\n')
-        {
-            message[--len] = '\0';
-        }
-
-        send(sock, message, strlen(message), 0);
-
-        memset(buffer, 0, BUFFER_SIZE);
-        int valread = read(sock, buffer, BUFFER_SIZE);
-        if (valread == -1)
-        {
-            perror("Error al leer del socket");
-            return -1;
-        }
-
-        printf("Respuesta del servidor: %s\n", buffer);
-
-        if (strcmp(message, "disconnect") == 0)
-        {
-            printf("Desconectando del servidor...\n");
-            break;
-        }
+        fgets(buffer, BUFFER_SIZE, stdin);
+        buffer[strcspn(buffer, "\n")] = 0; // Eliminar el salto de línea
+        send(sock, buffer, strlen(buffer), 0);
     }
 
     close(sock);

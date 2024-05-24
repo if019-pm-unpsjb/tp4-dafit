@@ -2,124 +2,97 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
-#include <fcntl.h>
-#include <errno.h>
+#include <pthread.h>
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
-int main(int argc, char *argv[])
+int clients[2]; // Array para guardar los descriptores de socket de los clientes
+int client_count = 0;
+
+void *handle_client(void *arg)
 {
-    int sockfd, max_sd, sd, new_socket, activity, i, valread;
-    int client_socket[30] = {0};
-    struct sockaddr_in servaddr, cliaddr;
-    fd_set readfds;
+    int client_socket = *((int *)arg);
     char buffer[BUFFER_SIZE];
+    int bytes_received;
 
-    // Crear socket
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0)
+    while ((bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0)
     {
-        perror("Error al crear socket");
+        buffer[bytes_received] = '\0';
+        printf("Mensaje recibido: %s\n", buffer);
+
+        // Reenviar mensaje al otro cliente
+        int other_client = (client_socket == clients[0]) ? clients[1] : clients[0];
+        send(other_client, buffer, bytes_received, 0);
+    }
+
+    close(client_socket);
+    return NULL;
+}
+
+int main()
+{
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+    {
+        perror("Error al crear el socket");
         exit(EXIT_FAILURE);
     }
 
-    // Configurar dirección y puerto del servidor
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = INADDR_ANY;
-    servaddr.sin_port = htons(PORT);
-
-    // Vincular el socket con la dirección y puerto
-    if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)))
     {
-        perror("Error al vincular");
-        close(sockfd);
+        perror("Error al configurar el socket");
+        close(server_fd);
         exit(EXIT_FAILURE);
     }
 
-    // Escuchar por conexiones entrantes
-    if (listen(sockfd, 3) < 0)
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
     {
-        perror("Error al escuchar");
-        close(sockfd);
+        perror("Error en bind");
+        close(server_fd);
         exit(EXIT_FAILURE);
     }
 
-    printf("Servidor escuchando en el puerto %d\n", PORT);
-
-    // Aceptar conexiones entrantes
-    while (1)
+    if (listen(server_fd, 3) < 0)
     {
-        FD_ZERO(&readfds);
-        FD_SET(sockfd, &readfds);
-        max_sd = sockfd;
-
-        for (i = 0; i < 30; i++)
-        {
-            sd = client_socket[i];
-            if (sd > 0)
-                FD_SET(sd, &readfds);
-            if (sd > max_sd)
-                max_sd = sd;
-        }
-
-        activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
-        if ((activity < 0) && (errno != EINTR))
-        {
-            perror("Error en select");
-        }
-
-        if (FD_ISSET(sockfd, &readfds))
-        {
-            socklen_t cli_len = sizeof(cliaddr);
-            new_socket = accept(sockfd, (struct sockaddr *)&cliaddr, &cli_len);
-            if (new_socket < 0)
-            {
-                perror("Error al aceptar conexión");
-                exit(EXIT_FAILURE);
-            }
-
-            printf("Nueva conexión, socket fd es %d, IP es: %s, puerto: %d\n",
-                   new_socket, inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
-
-            for (i = 0; i < 30; i++)
-            {
-                socklen_t cli_len = sizeof(cliaddr);
-                if (client_socket[i] == 0)
-                {
-                    client_socket[i] = new_socket;
-                    printf("Añadiendo a la lista de sockets como %d\n", i);
-                    break;
-                }
-            }
-        }
-
-        for (i = 0; i < 30; i++)
-        {
-            sd = client_socket[i];
-            if (FD_ISSET(sd, &readfds))
-            {
-                if ((valread = read(sd, buffer, BUFFER_SIZE)) == 0)
-                {
-                    getpeername(sd, (struct sockaddr *)&cliaddr, &cli_len);
-                    printf("Host desconectado, IP %s, puerto %d\n",
-                           inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
-                    close(sd);
-                    client_socket[i] = 0;
-                }
-                else
-                {
-                    buffer[valread] = '\0';
-                    printf("Mensaje recibido: %s\n", buffer);
-                    send(sd, buffer, strlen(buffer), 0);
-                }
-            }
-        }
+        perror("Error en listen");
+        close(server_fd);
+        exit(EXIT_FAILURE);
     }
 
-    close(sockfd);
+    printf("Esperando conexiones...\n");
+
+    while (client_count < 3)
+    {
+        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
+        {
+            perror("Error en accept");
+            close(server_fd);
+            exit(EXIT_FAILURE);
+        }
+
+        clients[client_count++] = new_socket;
+        printf("Cliente %d conectado\n", client_count);
+
+        pthread_t thread_id;
+        pthread_create(&thread_id, NULL, handle_client, (void *)&new_socket);
+    }
+
+    // // Esperar que todos los clientes se desconecten
+    // for (int i = 0; i < 2; ++i)
+    // {
+    //     close(clients[i]);
+    // }
+
+    close(server_fd);
     return 0;
 }
