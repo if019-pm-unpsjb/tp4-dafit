@@ -95,6 +95,12 @@ void *handle_client(void *arg)
                             file_name = file_path; // Si no hay '/', usar el file_path completo
                         }
 
+                        struct stat st = {0};
+                        if (stat(FILE_SAVE_DIR, &st) == -1)
+                        {
+                            mkdir(FILE_SAVE_DIR, 0700);
+                        }
+
                         char full_path[FULL_PATH_SIZE];
                         snprintf(full_path, FULL_PATH_SIZE, "%s%s", FILE_SAVE_DIR, file_name);
 
@@ -111,6 +117,7 @@ void *handle_client(void *arg)
                             bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0);
                             if (bytes_received <= 0)
                             {
+                                perror("Error en recv");
                                 break;
                             }
                             write(file_fd, buffer, bytes_received);
@@ -119,11 +126,14 @@ void *handle_client(void *arg)
 
                         close(file_fd);
                         printf("Archivo %s recibido con éxito y guardado en %s\n", file_path, full_path);
+                        char message[BUFFER_SIZE];
+                        snprintf(message, BUFFER_ENVIADO, "[%s] envio un archivo: %s", nombre, file_path + strlen(file_path)+1);
+                        send(target_socket, message, strlen(message), 0);
                     }
                     else
                     {
                         char message[BUFFER_SIZE];
-                        snprintf(message, BUFFER_SIZE, "mensaje enviado de %s: %s", nombre, buffer + strlen(target_nombre) + 1);
+                        snprintf(message, BUFFER_SIZE, "[%s]: %s", nombre, buffer + strlen(target_nombre) + 1);
                         send(target_socket, message, strlen(message), 0);
                         printf("Mensaje enviado a %s: %s\n", target_nombre, buffer + strlen(target_nombre) + 1);
                     }

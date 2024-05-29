@@ -33,36 +33,59 @@ void *receive_messages(void *arg)
 
 void send_file(int sock, const char *target_name, const char *file_path)
 {
+    if (access(file_path, F_OK) != 0){
+        perror("El archivo no existe");
+        return;
+    }
+
+    if (access(file_path, R_OK) != 0){
+        perror("No hay permisos de lectura para el archivo");
+        return;
+    }
+
     int file_fd = open(file_path, O_RDONLY);
     if (file_fd < 0){
         perror("Error al abrir el archivo");
         return;
+    }else{
+        printf("Archivo abierto con descriptor: %d\n", file_fd);
     }
 
+    // Obtener información del archivo
     struct stat file_stat;
     if (fstat(file_fd, &file_stat) < 0){
-        perror("Error al obtener informacion del archivo");
+        perror("Error al obtener información del archivo");
         close(file_fd);
         return;
+    }else{
+        printf("Tamaño del archivo: %ld bytes\n", file_stat.st_size);
     }
 
     // Enviar la indicación de que se va a enviar un archivo y su tamaño
-    char header[BUFFER_SIZE];
-    snprintf(header, BUFFER_SIZE, "%s archivo %s %ld", target_name, file_path, file_stat.st_size);
-    send(sock, header, strlen(header), 0);
+    // char header[BUFFER_SIZE];
+    // snprintf(header, BUFFER_SIZE, "%s archivo %s %ld", target_name, file_path, file_stat.st_size);
+    // if (send(sock, header, strlen(header), 0) < 0)
+    // {
+    //     perror("Error al enviar el encabezado");
+    //     close(file_fd);
+    //     return;
+    // }
 
     off_t offset= 0;
+    ssize_t sent_bytes;
     size_t remaining = file_stat.st_size;
 
-    while(remaining > 0){
-        ssize_t sent = sendfile(sock, file_fd, &offset, remaining);
-        if( sent <= 0){
+    printf("Enviando contenido del archivo...\n");
+    while (remaining > 0){
+        sent_bytes = sendfile(file_fd, sock, &offset, remaining);
+        if (sent_bytes <= 0)
+        {
             perror("Error al enviar archivo");
             break;
         }
-        remaining -= sent;
+        remaining -= sent_bytes;
+        printf("Bytes enviados: %ld, Bytes restantes: %ld\n", sent_bytes, remaining);
     }
-
     close(file_fd);
 }
 
@@ -122,20 +145,16 @@ int main(int argc, char *argv[]){
             char target_name[NOMBRE_SIZE + 1];
             char file_name[BUFFER_SIZE];
 
-            memset(target_name, 0, sizeof(target_name));
-            memset(file_name, 0, sizeof(file_name));
-
             if (sscanf(buffer, "archivo %4s %s", target_name, file_name) == 2)
             {
-                printf("%s - %s\n", target_name, file_name);
+                printf("target %s - file %s\n", target_name, file_name);
                 send_file(sock, target_name, file_name);
             }
             else
             {
                 printf("Formato incorrecto. Use: <Nombre> archivo <ruta_del_archivo>\n");
             }
-        }
-        else{
+        }else{
             send(sock, buffer, strlen(buffer), 0);
             }
         }
