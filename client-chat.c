@@ -4,8 +4,10 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <sys/sendfile.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
-#define PORT 8080
 #define BUFFER_SIZE 1024
 #define NOMBRE_SIZE 4
 
@@ -21,11 +23,51 @@ void *receive_messages(void *arg)
         printf("%s\n", buffer);
     }
 
+    if (bytes_received < 0)
+    {
+        perror("Error en recv");
+    }
+
     return NULL;
 }
 
-int main(int argc, char *argv[])
+void send_file(int sock, const char *target_name, const char *file_path)
 {
+    int file_fd = open(file_path, O_RDONLY);
+    if (file_fd < 0){
+        perror("Error al abrir el archivo");
+        return;
+    }
+
+    struct stat file_stat;
+    if (fstat(file_fd, &file_stat) < 0){
+        perror("Error al obtener informacion del archivo");
+        close(file_fd);
+        return;
+    }
+
+    // Enviar la indicación de que se va a enviar un archivo y su tamaño
+    char header[BUFFER_SIZE];
+    snprintf(header, BUFFER_SIZE, "%s archivo %s %ld", target_name, file_path, file_stat.st_size);
+    send(sock, header, strlen(header), 0);
+
+    off_t offset= 0;
+    size_t remaining = file_stat.st_size;
+
+    while(remaining > 0){
+        ssize_t sent = sendfile(sock, file_fd, &offset, remaining);
+        if( sent <= 0){
+            perror("Error al enviar archivo");
+            break;
+        }
+        remaining -= sent;
+    }
+
+    close(file_fd);
+}
+
+int main(int argc, char *argv[]){
+
     if (argc != 4)
     {
         printf("El comando debe ser: %s <IP> <PUERTO> <NOMBRE\n", argv[0]);
@@ -48,7 +90,6 @@ int main(int argc, char *argv[])
     }
 
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(PORT);
     serv_addr.sin_port = htons(atoi(argv[2]));
 
     if (inet_pton(AF_INET, argv[1], (void *)&serv_addr.sin_addr) <= 0)
@@ -73,12 +114,31 @@ int main(int argc, char *argv[])
     pthread_t thread_id;
     pthread_create(&thread_id, NULL, receive_messages, (void *)&sock);
 
-    while (1)
-    {
+    while (1){
         fgets(buffer, BUFFER_SIZE, stdin);
         buffer[strcspn(buffer, "\n")] = 0; // Eliminar el salto de línea
-        send(sock, buffer, strlen(buffer), 0);
-    }
+
+        if (strncmp(buffer, "archivo", 7) == 0){
+            char target_name[NOMBRE_SIZE + 1];
+            char file_name[BUFFER_SIZE];
+
+            memset(target_name, 0, sizeof(target_name));
+            memset(file_name, 0, sizeof(file_name));
+
+            if (sscanf(buffer, "archivo %4s %s", target_name, file_name) == 2)
+            {
+                printf("%s - %s\n", target_name, file_name);
+                send_file(sock, target_name, file_name);
+            }
+            else
+            {
+                printf("Formato incorrecto. Use: <Nombre> archivo <ruta_del_archivo>\n");
+            }
+        }
+        else{
+            send(sock, buffer, strlen(buffer), 0);
+            }
+        }
 
     close(sock);
     return 0;

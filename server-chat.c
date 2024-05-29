@@ -4,16 +4,21 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
 #define BUFFER_ENVIADO 2048
 #define NOMBRE_SIZE 4
 #define MAX_CLIENTS 10
+#define FILE_SAVE_DIR "recibido/"
+#define FULL_PATH_SIZE 2048 // Tamaño suficiente para combinar FILE_SAVE_DIR y file_path
 
 typedef struct {
     int socket;
-    char nombre[NOMBRE_SIZE];
+    char nombre[NOMBRE_SIZE + 1];
 } Cliente;
 
 int clients[10]; // Array para guardar los descriptores de socket de los clientes
@@ -55,13 +60,13 @@ void *handle_client(void *arg)
             }
             pthread_mutex_unlock(&clientes_mutex);
             send(client_socket, respuesta, strlen(respuesta), 0);
-        }else{
-            // Extraer el nombre del cliente y el mensaje
+        
+        }else
+        {
             char target_nombre[NOMBRE_SIZE + 1];
-            char message[BUFFER_SIZE];
-            if (sscanf(buffer, "%4s %[^\n]", target_nombre, message) == 2)
+            char command[BUFFER_SIZE];
+            if (sscanf(buffer, "%4s %s", target_nombre, command) == 2)
             {
-                // Encontrar el descriptor de socket del cliente objetivo
                 int target_socket = -1;
                 pthread_mutex_lock(&clientes_mutex);
                 for (int i = 0; i < client_count; ++i)
@@ -76,10 +81,52 @@ void *handle_client(void *arg)
 
                 if (target_socket != -1)
                 {
-                    char mensaje_enviado[BUFFER_ENVIADO];
-                    snprintf(mensaje_enviado, BUFFER_ENVIADO, "mensaje enviado de %s: %s", nombre, message);
-                    send(target_socket, mensaje_enviado, strlen(mensaje_enviado), 0);
-                    printf("Mensaje enviado a %s: %s\n", target_nombre, message);
+                    if (strcmp(command, "archivo") == 0)
+                    {
+                        char file_path[BUFFER_SIZE];
+                        long file_size;
+                        sscanf(buffer + strlen(target_nombre) + strlen(command) + 2, "%s %ld", file_path, &file_size);
+
+                        // Buscar el último '/' en file_path para obtener solo el nombre del archivo
+                        char *file_name = strrchr(file_path, '/');
+                        if (file_name != NULL){
+                            file_name++; // Avanzar un carácter para saltar el '/'
+                        }else{
+                            file_name = file_path; // Si no hay '/', usar el file_path completo
+                        }
+
+                        char full_path[FULL_PATH_SIZE];
+                        snprintf(full_path, FULL_PATH_SIZE, "%s%s", FILE_SAVE_DIR, file_name);
+
+                        int file_fd = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                        if (file_fd < 0)
+                        {
+                            perror("Error al crear el archivo");
+                            continue;
+                        }
+
+                        long remaining = file_size;
+                        while (remaining > 0)
+                        {
+                            bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0);
+                            if (bytes_received <= 0)
+                            {
+                                break;
+                            }
+                            write(file_fd, buffer, bytes_received);
+                            remaining -= bytes_received;
+                        }
+
+                        close(file_fd);
+                        printf("Archivo %s recibido con éxito y guardado en %s\n", file_path, full_path);
+                    }
+                    else
+                    {
+                        char message[BUFFER_SIZE];
+                        snprintf(message, BUFFER_SIZE, "mensaje enviado de %s: %s", nombre, buffer + strlen(target_nombre) + 1);
+                        send(target_socket, message, strlen(message), 0);
+                        printf("Mensaje enviado a %s: %s\n", target_nombre, buffer + strlen(target_nombre) + 1);
+                    }
                 }
                 else
                 {
@@ -89,7 +136,7 @@ void *handle_client(void *arg)
             }
             else
             {
-                const char *error_msg = "Formato de mensaje incorrecto. Use: <Nombre> <mensaje>\n";
+                const char *error_msg = "Formato de mensaje incorrecto. Use: <Nombre> <mensaje/archivo>\n";
                 send(client_socket, error_msg, strlen(error_msg), 0);
             }
         }
