@@ -21,12 +21,9 @@ typedef struct {
     char nombre[NOMBRE_SIZE + 1];
 } Cliente;
 
-int clients[10]; // Array para guardar los descriptores de socket de los clientes
+Cliente clientes[MAX_CLIENTS]; // Array para guardar los descriptores de socket de los clientes
 int client_count = 0;
-Cliente clientes[MAX_CLIENTS];
 pthread_mutex_t clientes_mutex = PTHREAD_MUTEX_INITIALIZER;
-//sendfile pa mandar archivos
-
 
 void *handle_client(void *arg)
 {
@@ -43,7 +40,7 @@ void *handle_client(void *arg)
     client_count++;
     pthread_mutex_unlock(&clientes_mutex);
 
-    printf("Cliente conectado: %s\n", nombre);
+    printf("Cliente %d conectado: %s\n", client_count, nombre);
 
     while ((bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0)
     {
@@ -60,9 +57,7 @@ void *handle_client(void *arg)
             }
             pthread_mutex_unlock(&clientes_mutex);
             send(client_socket, respuesta, strlen(respuesta), 0);
-        
-        }else
-        {
+        } else {
             char target_nombre[NOMBRE_SIZE + 1];
             char command[BUFFER_SIZE];
             if (sscanf(buffer, "%4s %s", target_nombre, command) == 2)
@@ -89,9 +84,12 @@ void *handle_client(void *arg)
 
                         // Buscar el último '/' en file_path para obtener solo el nombre del archivo
                         char *file_name = strrchr(file_path, '/');
-                        if (file_name != NULL){
+                        if (file_name != NULL)
+                        {
                             file_name++; // Avanzar un carácter para saltar el '/'
-                        }else{
+                        }
+                        else
+                        {
                             file_name = file_path; // Si no hay '/', usar el file_path completo
                         }
 
@@ -103,7 +101,7 @@ void *handle_client(void *arg)
 
                         char full_path[FULL_PATH_SIZE];
                         snprintf(full_path, FULL_PATH_SIZE, "%s%s", FILE_SAVE_DIR, file_name);
-
+                        printf("%s\n", full_path);
                         int file_fd = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
                         if (file_fd < 0)
                         {
@@ -127,7 +125,7 @@ void *handle_client(void *arg)
                         close(file_fd);
                         printf("Archivo %s recibido con éxito y guardado en %s\n", file_path, full_path);
                         char message[BUFFER_SIZE];
-                        snprintf(message, BUFFER_ENVIADO, "[%s] envio un archivo: %s", nombre, file_path + strlen(file_path)+1);
+                        snprintf(message, BUFFER_ENVIADO, "[%s] envio un archivo: %s", nombre, file_name);
                         send(target_socket, message, strlen(message), 0);
                     }
                     else
@@ -176,7 +174,7 @@ int main()
 {
     int server_fd, new_socket;
     struct sockaddr_in address;
-    int opt = 1;
+     int opt = 1;
     int addrlen = sizeof(address);
 
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
@@ -212,7 +210,7 @@ int main()
 
     printf("Esperando conexiones...\n");
 
-    while (client_count <= MAX_CLIENTS)
+    while (1)
     {
         if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
         {
@@ -221,18 +219,18 @@ int main()
             exit(EXIT_FAILURE);
         }
 
-        clients[client_count++] = new_socket;
-        printf("Cliente %d conectado\n", client_count);
+        pthread_mutex_lock(&clientes_mutex);
+        if (client_count >= MAX_CLIENTS)
+        {
+            close(new_socket);
+            pthread_mutex_unlock(&clientes_mutex);
+            continue;
+        }
+        pthread_mutex_unlock(&clientes_mutex);
 
         pthread_t thread_id;
         pthread_create(&thread_id, NULL, handle_client, (void *)&new_socket);
     }
-
-    // // Esperar que todos los clientes se desconecten
-    // for (int i = 0; i < 2; ++i)
-    // {
-    //     close(clients[i]);
-    // }
 
     close(server_fd);
     return 0;

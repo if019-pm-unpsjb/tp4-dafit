@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 2048
 #define NOMBRE_SIZE 4
 
 void *receive_messages(void *arg)
@@ -33,51 +33,58 @@ void *receive_messages(void *arg)
 
 void send_file(int sock, const char *target_name, const char *file_path)
 {
-    if (access(file_path, F_OK) != 0){
+    // Imprimir la ruta completa del archivo para depuración
+    printf("Ruta del archivo a enviar: %s\n", file_path);
+
+    if (access(file_path, F_OK) != 0)
+    {
         perror("El archivo no existe");
         return;
     }
 
-    if (access(file_path, R_OK) != 0){
+    if (access(file_path, R_OK) != 0)
+    {
         perror("No hay permisos de lectura para el archivo");
         return;
     }
 
     int file_fd = open(file_path, O_RDONLY);
-    if (file_fd < 0){
+    if (file_fd < 0)
+    {
         perror("Error al abrir el archivo");
         return;
-    }else{
-        printf("Archivo abierto con descriptor: %d\n", file_fd);
     }
 
     // Obtener información del archivo
     struct stat file_stat;
-    if (fstat(file_fd, &file_stat) < 0){
+    if (fstat(file_fd, &file_stat) < 0)
+    {
         perror("Error al obtener información del archivo");
         close(file_fd);
         return;
-    }else{
-        printf("Tamaño del archivo: %ld bytes\n", file_stat.st_size);
     }
 
-    // Enviar la indicación de que se va a enviar un archivo y su tamaño
-    // char header[BUFFER_SIZE];
-    // snprintf(header, BUFFER_SIZE, "%s archivo %s %ld", target_name, file_path, file_stat.st_size);
-    // if (send(sock, header, strlen(header), 0) < 0)
-    // {
-    //     perror("Error al enviar el encabezado");
-    //     close(file_fd);
-    //     return;
-    // }
+    printf("Tamaño del archivo: %ld bytes\n", file_stat.st_size);
 
-    off_t offset= 0;
+    // Enviar la indicación de que se va a enviar un archivo y su tamaño
+    char header[BUFFER_SIZE];
+    snprintf(header, BUFFER_SIZE, "%s archivo %s %ld", target_name, file_path, file_stat.st_size);
+    if (send(sock, header, strlen(header), 0) < 0)
+    {
+        perror("Error al enviar el encabezado");
+        close(file_fd);
+        return;
+    }
+    printf("Encabezado enviado: %s\n", header);
+
+    off_t offset = 0;
     ssize_t sent_bytes;
     size_t remaining = file_stat.st_size;
 
     printf("Enviando contenido del archivo...\n");
-    while (remaining > 0){
-        sent_bytes = sendfile(file_fd, sock, &offset, remaining);
+    while (remaining > 0)
+    {
+        sent_bytes = sendfile(sock, file_fd, &offset, remaining);
         if (sent_bytes <= 0)
         {
             perror("Error al enviar archivo");
@@ -87,13 +94,14 @@ void send_file(int sock, const char *target_name, const char *file_path)
         printf("Bytes enviados: %ld, Bytes restantes: %ld\n", sent_bytes, remaining);
     }
     close(file_fd);
+    printf("Archivo enviado con éxito.\n");
 }
 
-int main(int argc, char *argv[]){
-
+int main(int argc, char *argv[])
+{
     if (argc != 4)
     {
-        printf("El comando debe ser: %s <IP> <PUERTO> <NOMBRE\n", argv[0]);
+        printf("El comando debe ser: %s <IP> <PUERTO> <NOMBRE>\n", argv[0]);
         printf("El nombre debe ser de maximo 4 letras\n");
         return -1;
     }
@@ -137,11 +145,13 @@ int main(int argc, char *argv[]){
     pthread_t thread_id;
     pthread_create(&thread_id, NULL, receive_messages, (void *)&sock);
 
-    while (1){
+    while (1)
+    {
         fgets(buffer, BUFFER_SIZE, stdin);
         buffer[strcspn(buffer, "\n")] = 0; // Eliminar el salto de línea
 
-        if (strncmp(buffer, "archivo", 7) == 0){
+        if (strncmp(buffer, "archivo", 7) == 0)
+        {
             char target_name[NOMBRE_SIZE + 1];
             char file_name[BUFFER_SIZE];
 
@@ -154,10 +164,12 @@ int main(int argc, char *argv[]){
             {
                 printf("Formato incorrecto. Use: <Nombre> archivo <ruta_del_archivo>\n");
             }
-        }else{
-            send(sock, buffer, strlen(buffer), 0);
-            }
         }
+        else
+        {
+            send(sock, buffer, strlen(buffer), 0);
+        }
+    }
 
     close(sock);
     return 0;
