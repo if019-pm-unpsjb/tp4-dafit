@@ -32,7 +32,7 @@ void *receive_messages(void *arg)
             sscanf(filename, "%ld", &file_size);
             printf("Archivo entrante: %s\n", filename);
 
-            recieve_file(sock, filename, file_size); // Aquí se debe pasar 'sock' en lugar de 'client_sock'
+            recieve_file(sock, filename, file_size);
         }
         else
         {
@@ -48,22 +48,28 @@ void *receive_messages(void *arg)
     return NULL;
 }
 
+
 void recieve_file(int sock, const char *filename, long file_size)
 {
     char filepath[BUFFER_SIZE];
     snprintf(filepath, sizeof(filepath), "recibidos/%s", filename);
 
+    printf("Creando archivo: %s\n", filepath);
     int file_fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+
     if (file_fd < 0)
     {
         perror("open");
+        const char *error_message = "No se pudo crear archivo.\n";
+        send(sock, error_message, strlen(error_message), 0);
         return;
     }
 
     char buffer[BUFFER_SIZE];
     ssize_t bytes_received;
     long total_bytes_received = 0;
-
+    printf("Recibiendo datos:\n");
+    
     while (total_bytes_received < file_size)
     {
         bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
@@ -76,7 +82,8 @@ void recieve_file(int sock, const char *filename, long file_size)
 
         if (bytes_received == 0)
         {
-            printf("Conexión cerrada por el servidor antes de recibir todos los datos.\n");
+            // Conexión cerrada por el cliente
+            printf("Cliente cerró la conexión.\n");
             break;
         }
 
@@ -87,20 +94,18 @@ void recieve_file(int sock, const char *filename, long file_size)
             close(file_fd);
             return;
         }
-
         total_bytes_received += bytes_received;
     }
-
+    close(file_fd);
     if (total_bytes_received == file_size)
     {
-        printf("Archivo recibido correctamente.\n");
+        printf("Archivo recibió correctemente el archivo: %s.\n", filename);
     }
     else
     {
         printf("Error: Se recibieron %ld bytes, pero se esperaba %ld bytes.\n", total_bytes_received, file_size);
     }
 
-    close(file_fd);
 }
 
 void send_file(int sock, const char *target_name, const char *filename)

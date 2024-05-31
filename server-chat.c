@@ -63,7 +63,12 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
     char target_nombre[NOMBRE_SIZE + 1], command[BUFFER_SIZE], filename[BUFFER_SIZE];
     long file_size;
 
-    sscanf(buffer2, "%4s %s %s %ld", target_nombre, command, filename, &file_size);
+    if (sscanf(buffer2, "%4s %s %s %ld", target_nombre, command, filename, &file_size) != 4)
+    {
+        const char *error_message = "Error en el formato del mensaje.\n";
+        send(client_sock, error_message, strlen(error_message), 0);
+        return;
+    }
 
     int target_socket = obtener_socket_destinatario(target_nombre);
     if (target_socket == -1)
@@ -75,14 +80,13 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
 
     printf("Reenviando archivo a: %s\n", target_nombre);
 
-    char buffer[BUFFER_SIZE];
-    ssize_t bytes_received;
-    long total_bytes_received = 0;
-
     // Envía un mensaje al cliente para indicar que se enviará un archivo
     char file_message[FILE_MESSAGE_SIZE];
     snprintf(file_message, FILE_MESSAGE_SIZE, "FILE:%s", filename);
     send(target_socket, file_message, strlen(file_message), 0);
+    char buffer[BUFFER_SIZE];
+    ssize_t bytes_received;
+    long total_bytes_received = 0;
 
     while (total_bytes_received < file_size)
     {
@@ -99,8 +103,14 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
             printf("Conexión cerrada por el cliente antes de recibir todos los datos.\n");
             break;
         }
+        
+        ssize_t bytes_sent = send(target_socket, buffer, bytes_received, 0);
+        if (bytes_sent == -1)
+        {
+            perror("send");
+            return;
+        }
 
-        send(target_socket, buffer, bytes_received, 0);
         total_bytes_received += bytes_received;
     }
 
@@ -112,9 +122,9 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
     {
         printf("Error: Se recibieron %ld bytes, pero se esperaba %ld bytes.\n", total_bytes_received, file_size);
     }
-
-    close(client_sock);
+    
 }
+
 
 void manejar_mensaje(int client_socket, const char *nombre, const char *buffer)
 {
