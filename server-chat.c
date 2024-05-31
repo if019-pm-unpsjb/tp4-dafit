@@ -9,14 +9,17 @@
 #include <fcntl.h>
 
 #define PORT 8080
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 512
+#define FILEPATH_SIZE (BUFFER_SIZE + 14)
 #define BUFFER_ENVIADO 2048
+#define FILE_MESSAGE_SIZE (BUFFER_SIZE + 10)
 #define NOMBRE_SIZE 4
 #define MAX_CLIENTS 10
-#define FILE_SAVE_DIR "recibido/"
-#define FULL_PATH_SIZE 2048 // Tamaño suficiente para combinar FILE_SAVE_DIR y file_path
+#define MESSAGE_SIZE 512
+#define FILE_SAVE_DIR "server_files/"
 
-typedef struct {
+typedef struct
+{
     int socket;
     char nombre[NOMBRE_SIZE + 1];
 } Cliente;
@@ -24,6 +27,114 @@ typedef struct {
 Cliente clientes[MAX_CLIENTS]; // Array para guardar los descriptores de socket de los clientes
 int client_count = 0;
 pthread_mutex_t clientes_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void enviar_lista_de_clientes(int client_socket)
+{
+    char respuesta[BUFFER_SIZE] = "Lista de clientes:\n";
+    pthread_mutex_lock(&clientes_mutex);
+    for (int i = 0; i < client_count; ++i)
+    {
+        char client_info[50];
+        sprintf(client_info, "Cliente %d: %s\n", i + 1, clientes[i].nombre);
+        strcat(respuesta, client_info);
+    }
+    pthread_mutex_unlock(&clientes_mutex);
+    send(client_socket, respuesta, strlen(respuesta), 0);
+}
+
+int obtener_socket_destinatario(const char *target_nombre)
+{
+    int target_socket = -1;
+    pthread_mutex_lock(&clientes_mutex);
+    for (int i = 0; i < client_count; ++i)
+    {
+        if (strcmp(clientes[i].nombre, target_nombre) == 0)
+        {
+            target_socket = clientes[i].socket;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&clientes_mutex);
+    return target_socket;
+}
+
+void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
+{
+    char target_nombre[NOMBRE_SIZE + 1], command[BUFFER_SIZE], filename[BUFFER_SIZE];
+    long file_size;
+
+    sscanf(buffer2, "%4s %s %s %ld", target_nombre, command, filename, &file_size);
+
+    int target_socket = obtener_socket_destinatario(target_nombre);
+    if (target_socket == -1)
+    {
+        const char *error_message = "Cliente objetivo no encontrado.\n";
+        send(client_sock, error_message, strlen(error_message), 0);
+        return;
+    }
+
+    printf("Reenviando archivo a: %s\n", target_nombre);
+
+    char buffer[BUFFER_SIZE];
+    ssize_t bytes_received;
+    long total_bytes_received = 0;
+
+    // Envía un mensaje al cliente para indicar que se enviará un archivo
+    char file_message[FILE_MESSAGE_SIZE];
+    snprintf(file_message, FILE_MESSAGE_SIZE, "FILE:%s", filename);
+    send(target_socket, file_message, strlen(file_message), 0);
+
+    while (total_bytes_received < file_size)
+    {
+        bytes_received = recv(client_sock, buffer, BUFFER_SIZE, 0);
+        if (bytes_received == -1)
+        {
+            perror("recv");
+            return;
+        }
+
+        if (bytes_received == 0)
+        {
+            // Conexión cerrada por el cliente antes de recibir todos los datos
+            printf("Conexión cerrada por el cliente antes de recibir todos los datos.\n");
+            break;
+        }
+
+        send(target_socket, buffer, bytes_received, 0);
+        total_bytes_received += bytes_received;
+    }
+
+    if (total_bytes_received == file_size)
+    {
+        printf("Archivo reenviado correctamente a %s.\n", target_nombre);
+    }
+    else
+    {
+        printf("Error: Se recibieron %ld bytes, pero se esperaba %ld bytes.\n", total_bytes_received, file_size);
+    }
+
+    close(client_sock);
+}
+
+void manejar_mensaje(int client_socket, const char *nombre, const char *buffer)
+{
+    char target_nombre[NOMBRE_SIZE + 1];
+    sscanf(buffer, "%4s", target_nombre);
+
+    int target_socket = obtener_socket_destinatario(target_nombre);
+    if (target_socket != -1)
+    {
+        char message[BUFFER_SIZE];
+        snprintf(message, BUFFER_SIZE, "[%s]: %s", nombre, buffer + strlen(target_nombre) + 1);
+        send(target_socket, message, strlen(message), 0);
+        printf("Mensaje enviado a %s: %s\n", target_nombre, buffer + strlen(target_nombre) + 1);
+    }
+    else
+    {
+        const char *error_msg = "Cliente objetivo no encontrado.\n";
+        send(client_socket, error_msg, strlen(error_msg), 0);
+    }
+}
 
 void *handle_client(void *arg)
 {
@@ -48,105 +159,15 @@ void *handle_client(void *arg)
 
         if (strcmp(buffer, "clientes") == 0)
         {
-            char respuesta[BUFFER_SIZE] = "Lista de clientes:\n";
-            pthread_mutex_lock(&clientes_mutex);
-            for (int i = 0; i < client_count; ++i){
-                char client_info[50];
-                sprintf(client_info, "Cliente %d: %s\n", i + 1, clientes[i].nombre);
-                strcat(respuesta, client_info);
-            }
-            pthread_mutex_unlock(&clientes_mutex);
-            send(client_socket, respuesta, strlen(respuesta), 0);
-        } else {
-            char target_nombre[NOMBRE_SIZE + 1];
-            char command[BUFFER_SIZE];
-            if (sscanf(buffer, "%4s %s", target_nombre, command) == 2)
-            {
-                int target_socket = -1;
-                pthread_mutex_lock(&clientes_mutex);
-                for (int i = 0; i < client_count; ++i)
-                {
-                    if (strcmp(clientes[i].nombre, target_nombre) == 0)
-                    {
-                        target_socket = clientes[i].socket;
-                        break;
-                    }
-                }
-                pthread_mutex_unlock(&clientes_mutex);
-
-                if (target_socket != -1)
-                {
-                    if (strcmp(command, "archivo") == 0)
-                    {
-                        char file_path[BUFFER_SIZE];
-                        long file_size;
-                        sscanf(buffer + strlen(target_nombre) + strlen(command) + 2, "%s %ld", file_path, &file_size);
-
-                        // Buscar el último '/' en file_path para obtener solo el nombre del archivo
-                        char *file_name = strrchr(file_path, '/');
-                        if (file_name != NULL)
-                        {
-                            file_name++; // Avanzar un carácter para saltar el '/'
-                        }
-                        else
-                        {
-                            file_name = file_path; // Si no hay '/', usar el file_path completo
-                        }
-
-                        struct stat st = {0};
-                        if (stat(FILE_SAVE_DIR, &st) == -1)
-                        {
-                            mkdir(FILE_SAVE_DIR, 0700);
-                        }
-
-                        char full_path[FULL_PATH_SIZE];
-                        snprintf(full_path, FULL_PATH_SIZE, "%s%s", FILE_SAVE_DIR, file_name);
-                        printf("%s\n", full_path);
-                        int file_fd = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-                        if (file_fd < 0)
-                        {
-                            perror("Error al crear el archivo");
-                            continue;
-                        }
-
-                        long remaining = file_size;
-                        while (remaining > 0)
-                        {
-                            bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0);
-                            if (bytes_received <= 0)
-                            {
-                                perror("Error en recv");
-                                break;
-                            }
-                            write(file_fd, buffer, bytes_received);
-                            remaining -= bytes_received;
-                        }
-
-                        close(file_fd);
-                        printf("Archivo %s recibido con éxito y guardado en %s\n", file_path, full_path);
-                        char message[BUFFER_SIZE];
-                        snprintf(message, BUFFER_ENVIADO, "[%s] envio un archivo: %s", nombre, file_name);
-                        send(target_socket, message, strlen(message), 0);
-                    }
-                    else
-                    {
-                        char message[BUFFER_SIZE];
-                        snprintf(message, BUFFER_SIZE, "[%s]: %s", nombre, buffer + strlen(target_nombre) + 1);
-                        send(target_socket, message, strlen(message), 0);
-                        printf("Mensaje enviado a %s: %s\n", target_nombre, buffer + strlen(target_nombre) + 1);
-                    }
-                }
-                else
-                {
-                    const char *error_msg = "Cliente objetivo no encontrado.\n";
-                    send(client_socket, error_msg, strlen(error_msg), 0);
-                }
-            }
-            else
-            {
-                const char *error_msg = "Formato de mensaje incorrecto. Use: <Nombre> <mensaje/archivo>\n";
-                send(client_socket, error_msg, strlen(error_msg), 0);
-            }
+            enviar_lista_de_clientes(client_socket);
+        }
+        else if (strstr(buffer, "archivo") != NULL)
+        {
+            manejar_archivo(client_socket, nombre, buffer);
+        }
+        else
+        {
+            manejar_mensaje(client_socket, nombre, buffer);
         }
     }
 
@@ -174,7 +195,7 @@ int main()
 {
     int server_fd, new_socket;
     struct sockaddr_in address;
-     int opt = 1;
+    int opt = 1;
     int addrlen = sizeof(address);
 
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
@@ -230,6 +251,7 @@ int main()
 
         pthread_t thread_id;
         pthread_create(&thread_id, NULL, handle_client, (void *)&new_socket);
+        pthread_detach(thread_id); // Separar el hilo para que no tenga que ser unido
     }
 
     close(server_fd);

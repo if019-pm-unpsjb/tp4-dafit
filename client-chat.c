@@ -10,6 +10,11 @@
 
 #define BUFFER_SIZE 2048
 #define NOMBRE_SIZE 4
+#define MESSAGE_SIZE 512
+
+void *receive_messages(void *arg);
+void recieve_file(int sock, const char *filename, long file_size);
+void send_file(int sock, const char *target_name, const char *filename);
 
 void *receive_messages(void *arg)
 {
@@ -20,7 +25,19 @@ void *receive_messages(void *arg)
     while ((bytes_received = recv(sock, buffer, BUFFER_SIZE, 0)) > 0)
     {
         buffer[bytes_received] = '\0';
-        printf("%s\n", buffer);
+        if (strncmp(buffer, "FILE:", 5) == 0)
+        {
+            char *filename = buffer + 5;
+            long file_size;
+            sscanf(filename, "%ld", &file_size);
+            printf("Archivo entrante: %s\n", filename);
+
+            recieve_file(sock, filename, file_size); // Aquí se debe pasar 'sock' en lugar de 'client_sock'
+        }
+        else
+        {
+            printf("%s\n", buffer);
+        }
     }
 
     if (bytes_received < 0)
@@ -31,70 +48,124 @@ void *receive_messages(void *arg)
     return NULL;
 }
 
-void send_file(int sock, const char *target_name, const char *file_path)
+void recieve_file(int sock, const char *filename, long file_size)
 {
-    // Imprimir la ruta completa del archivo para depuración
-    printf("Ruta del archivo a enviar: %s\n", file_path);
+    char filepath[BUFFER_SIZE];
+    snprintf(filepath, sizeof(filepath), "recibidos/%s", filename);
 
-    if (access(file_path, F_OK) != 0)
-    {
-        perror("El archivo no existe");
-        return;
-    }
-
-    if (access(file_path, R_OK) != 0)
-    {
-        perror("No hay permisos de lectura para el archivo");
-        return;
-    }
-
-    int file_fd = open(file_path, O_RDONLY);
+    int file_fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (file_fd < 0)
     {
-        perror("Error al abrir el archivo");
+        perror("open");
         return;
     }
 
-    // Obtener información del archivo
+    char buffer[BUFFER_SIZE];
+    ssize_t bytes_received;
+    long total_bytes_received = 0;
+
+    while (total_bytes_received < file_size)
+    {
+        bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
+        if (bytes_received == -1)
+        {
+            perror("recv");
+            close(file_fd);
+            return;
+        }
+
+        if (bytes_received == 0)
+        {
+            printf("Conexión cerrada por el servidor antes de recibir todos los datos.\n");
+            break;
+        }
+
+        ssize_t bytes_written = write(file_fd, buffer, bytes_received);
+        if (bytes_written < 0)
+        {
+            perror("write");
+            close(file_fd);
+            return;
+        }
+
+        total_bytes_received += bytes_received;
+    }
+
+    if (total_bytes_received == file_size)
+    {
+        printf("Archivo recibido correctamente.\n");
+    }
+    else
+    {
+        printf("Error: Se recibieron %ld bytes, pero se esperaba %ld bytes.\n", total_bytes_received, file_size);
+    }
+
+    close(file_fd);
+}
+
+void send_file(int sock, const char *target_name, const char *filename)
+{
+    // Imprimir la ruta completa del archivo para depuración
+    printf("Ruta del archivo a enviar: %s\n", filename);
+
+    char filepath[BUFFER_SIZE];
+    snprintf(filepath, sizeof(filepath), "client_files/%s", filename);
+
+    printf("Abriendo archivo: %s\n", filepath);
+    int file_fd = open(filepath, O_RDONLY);
+
+    if (file_fd < 0)
+    {
+        perror("open");
+        char *error_message = "No se encontró el archivo.\n";
+        send(sock, error_message, strlen(error_message), 0);
+        return;
+    }
+
+    // Obtener el tamaño del archivo
     struct stat file_stat;
     if (fstat(file_fd, &file_stat) < 0)
     {
-        perror("Error al obtener información del archivo");
+        perror("fstat");
         close(file_fd);
         return;
     }
+    long file_size = file_stat.st_size;
 
-    printf("Tamaño del archivo: %ld bytes\n", file_stat.st_size);
+    // Enviar comando al servidor con el tamaño del archivo
+    char command[BUFFER_SIZE];
+    snprintf(command, sizeof(command), "%s archivo %s %ld", target_name, filename, file_size);
+    send(sock, command, strlen(command), 0);
 
-    // Enviar la indicación de que se va a enviar un archivo y su tamaño
-    char header[BUFFER_SIZE];
-    snprintf(header, BUFFER_SIZE, "%s archivo %s %ld", target_name, file_path, file_stat.st_size);
-    if (send(sock, header, strlen(header), 0) < 0)
+    printf("Se abrió el archivo: %s\n", filepath);
+    char buffer[BUFFER_SIZE];
+    ssize_t bytes_read;
+
+    while ((bytes_read = read(file_fd, buffer, BUFFER_SIZE)) > 0)
     {
-        perror("Error al enviar el encabezado");
-        close(file_fd);
-        return;
-    }
-    printf("Encabezado enviado: %s\n", header);
+        printf("Bytes leídos: %zd\n", bytes_read);
+        ssize_t bytes_sent = send(sock, buffer, bytes_read, 0);
 
-    off_t offset = 0;
-    ssize_t sent_bytes;
-    size_t remaining = file_stat.st_size;
-
-    printf("Enviando contenido del archivo...\n");
-    while (remaining > 0)
-    {
-        sent_bytes = sendfile(sock, file_fd, &offset, remaining);
-        if (sent_bytes <= 0)
+        if (bytes_sent < 0)
         {
-            perror("Error al enviar archivo");
-            break;
+            perror("send");
+            close(file_fd);
+            return;
         }
-        remaining -= sent_bytes;
-        printf("Bytes enviados: %ld, Bytes restantes: %ld\n", sent_bytes, remaining);
+
+        printf("Bytes enviados: %zd\n", bytes_sent);
     }
+
+    if (bytes_read < 0)
+    {
+        perror("read");
+    }
+    else
+    {
+        printf("El archivo completo fue enviado.\n");
+    }
+
     close(file_fd);
-    printf("Archivo enviado con éxito.\n");
 }
 
 int main(int argc, char *argv[])
@@ -102,7 +173,7 @@ int main(int argc, char *argv[])
     if (argc != 4)
     {
         printf("El comando debe ser: %s <IP> <PUERTO> <NOMBRE>\n", argv[0]);
-        printf("El nombre debe ser de maximo 4 letras\n");
+        printf("El nombre debe ser de máximo 4 letras\n");
         return -1;
     }
 
@@ -139,7 +210,7 @@ int main(int argc, char *argv[])
 
     printf("Conectado al servidor\n");
 
-    // enviar el nombre al servidor
+    // Enviar el nombre al servidor
     send(sock, nombre, strlen(nombre), 0);
 
     pthread_t thread_id;
@@ -150,15 +221,20 @@ int main(int argc, char *argv[])
         fgets(buffer, BUFFER_SIZE, stdin);
         buffer[strcspn(buffer, "\n")] = 0; // Eliminar el salto de línea
 
-        if (strncmp(buffer, "archivo", 7) == 0)
-        {
-            char target_name[NOMBRE_SIZE + 1];
-            char file_name[BUFFER_SIZE];
+        // Buscar el comando "archivo" después del nombre del destinatario
+        char target_name[NOMBRE_SIZE + 1];
+        char command[BUFFER_SIZE];
+        char file_name[BUFFER_SIZE];
 
-            if (sscanf(buffer, "archivo %4s %s", target_name, file_name) == 2)
+        if (sscanf(buffer, "%4s %7s %s", target_name, command, file_name) == 3 && strcmp(command, "archivo") == 0)
+        {
+            if (sscanf(buffer, "%*s %*s %s", file_name) == 1)
             {
                 printf("target %s - file %s\n", target_name, file_name);
                 send_file(sock, target_name, file_name);
+                // Esperar confirmación del servidor
+                recv(sock, buffer, BUFFER_SIZE, 0);
+                printf("Respuesta del servidor: %s\n", buffer);
             }
             else
             {
