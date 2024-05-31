@@ -82,8 +82,9 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
 
     // Envía un mensaje al cliente para indicar que se enviará un archivo
     char file_message[FILE_MESSAGE_SIZE];
-    snprintf(file_message, FILE_MESSAGE_SIZE, "FILE:%s", filename);
+    snprintf(file_message, FILE_MESSAGE_SIZE, "FILE:%s %ld", filename, file_size);
     send(target_socket, file_message, strlen(file_message), 0);
+
     char buffer[BUFFER_SIZE];
     ssize_t bytes_received;
     long total_bytes_received = 0;
@@ -103,7 +104,7 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
             printf("Conexión cerrada por el cliente antes de recibir todos los datos.\n");
             break;
         }
-        
+
         ssize_t bytes_sent = send(target_socket, buffer, bytes_received, 0);
         if (bytes_sent == -1)
         {
@@ -114,15 +115,21 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
         total_bytes_received += bytes_received;
     }
 
+    // Enviar señal de finalización de transferencia
+    send(target_socket, "END_OF_FILE", strlen("END_OF_FILE"), 0);
+
     if (total_bytes_received == file_size)
     {
-        printf("Archivo reenviado correctamente a %s.\n", target_nombre);
+        printf("Archivo %s reenviado correctamente a %s.\n", filename, target_nombre);
+        const char *success_message = "Archivo recibido correctamente.\n";
+        send(client_sock, success_message, strlen(success_message), 0);
     }
     else
     {
         printf("Error: Se recibieron %ld bytes, pero se esperaba %ld bytes.\n", total_bytes_received, file_size);
+        const char *error_message = "Error al recibir el archivo.\n";
+        send(client_sock, error_message, strlen(error_message), 0);
     }
-    
 }
 
 

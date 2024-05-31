@@ -27,9 +27,9 @@ void *receive_messages(void *arg)
         buffer[bytes_received] = '\0';
         if (strncmp(buffer, "FILE:", 5) == 0)
         {
-            char *filename = buffer + 5;
+            char filename[BUFFER_SIZE];
             long file_size;
-            sscanf(filename, "%ld", &file_size);
+            sscanf(buffer + 5, "%s %ld", filename, &file_size);
             printf("Archivo entrante: %s\n", filename);
 
             recieve_file(sock, filename, file_size);
@@ -47,7 +47,6 @@ void *receive_messages(void *arg)
 
     return NULL;
 }
-
 
 void recieve_file(int sock, const char *filename, long file_size)
 {
@@ -69,7 +68,7 @@ void recieve_file(int sock, const char *filename, long file_size)
     ssize_t bytes_received;
     long total_bytes_received = 0;
     printf("Recibiendo datos:\n");
-    
+
     while (total_bytes_received < file_size)
     {
         bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
@@ -87,6 +86,13 @@ void recieve_file(int sock, const char *filename, long file_size)
             break;
         }
 
+        // Verificar si hemos recibido el mensaje de finalización
+        if (bytes_received == strlen("END_OF_FILE") && strncmp(buffer, "END_OF_FILE", strlen("END_OF_FILE")) == 0)
+        {
+            printf("Transferencia de archivo completada.\n");
+            break;
+        }
+
         ssize_t bytes_written = write(file_fd, buffer, bytes_received);
         if (bytes_written < 0)
         {
@@ -99,18 +105,16 @@ void recieve_file(int sock, const char *filename, long file_size)
     close(file_fd);
     if (total_bytes_received == file_size)
     {
-        printf("Archivo recibió correctemente el archivo: %s.\n", filename);
+        printf("Se recibió correctamente el archivo: %s.\n", filename);
     }
     else
     {
         printf("Error: Se recibieron %ld bytes, pero se esperaba %ld bytes.\n", total_bytes_received, file_size);
     }
-
 }
 
 void send_file(int sock, const char *target_name, const char *filename)
 {
-    // Imprimir la ruta completa del archivo para depuración
     printf("Ruta del archivo a enviar: %s\n", filename);
 
     char filepath[BUFFER_SIZE];
@@ -171,6 +175,23 @@ void send_file(int sock, const char *target_name, const char *filename)
     }
 
     close(file_fd);
+
+    // Enviar mensaje de finalización
+    const char *end_message = "END_OF_FILE";
+    send(sock, end_message, strlen(end_message), 0);
+
+    // Esperar la confirmación del servidor
+    char response[BUFFER_SIZE];
+    int bytes_received = recv(sock, response, sizeof(response) - 1, 0);
+    if (bytes_received > 0)
+    {
+        response[bytes_received] = '\0';
+        printf("Respuesta del servidor: %s\n", response);
+    }
+    else
+    {
+        perror("Error al recibir la confirmación del servidor");
+    }
 }
 
 int main(int argc, char *argv[])
