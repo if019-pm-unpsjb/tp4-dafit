@@ -12,9 +12,16 @@
 #define NOMBRE_SIZE 4
 #define MESSAGE_SIZE 512
 
+#define OPCODE_MSJE 1
+#define OPCODE_ARCH 2
+#define OPCODE_LIST 3
+#define OPCODE_ACK 4
+#define OPCODE_ERROR 5
+
 void *receive_messages(void *arg);
 void recieve_file(int sock, const char *filename, long file_size);
 void send_file(int sock, const char *target_name, const char *filename);
+void send_ack(int sock, const char *filename);
 
 void *receive_messages(void *arg)
 {
@@ -25,18 +32,19 @@ void *receive_messages(void *arg)
     while ((bytes_received = recv(sock, buffer, BUFFER_SIZE, 0)) > 0)
     {
         buffer[bytes_received] = '\0';
-        if (strncmp(buffer, "FILE:", 5) == 0)
+        int opcode = ntohs(*(uint16_t *)buffer);
+        if (opcode == OPCODE_ARCH)
         {
-            char filename[BUFFER_SIZE];
+            char target_nombre[NOMBRE_SIZE + 1], filename[BUFFER_SIZE];
             long file_size;
-            sscanf(buffer + 5, "%s %ld", filename, &file_size);
-            printf("Archivo entrante: %s\n", filename);
 
+            if (sscanf(buffer + 2, "%4s %s %ld", target_nombre, filename, &file_size) != 3)
+                printf("Archivo entrante: %s\n", filename);
             recieve_file(sock, filename, file_size);
         }
         else
         {
-            printf("%s\n", buffer);
+            printf("%s\n", buffer); // Imprimir el mensaje después del OPCODE
         }
     }
 
@@ -86,13 +94,6 @@ void recieve_file(int sock, const char *filename, long file_size)
             break;
         }
 
-        // Verificar si hemos recibido el mensaje de finalización
-        if (bytes_received == strlen("END_OF_FILE") && strncmp(buffer, "END_OF_FILE", strlen("END_OF_FILE")) == 0)
-        {
-            printf("Transferencia de archivo completada.\n");
-            break;
-        }
-
         ssize_t bytes_written = write(file_fd, buffer, bytes_received);
         if (bytes_written < 0)
         {
@@ -106,11 +107,23 @@ void recieve_file(int sock, const char *filename, long file_size)
     if (total_bytes_received == file_size)
     {
         printf("Se recibió correctamente el archivo: %s.\n", filename);
+        send_ack(sock, filename);
     }
     else
     {
         printf("Error: Se recibieron %ld bytes, pero se esperaba %ld bytes.\n", total_bytes_received, file_size);
     }
+}
+
+void send_ack(int sock, const char *filename)
+{
+    char ack[BUFFER_SIZE];
+    uint16_t opcode = htons(OPCODE_ACK);
+    memcpy(ack, &opcode, sizeof(opcode));
+    strcpy(ack + sizeof(opcode), filename);
+
+    send(sock, ack, sizeof(opcode) + strlen(filename) + 1, 0);
+    printf("Enviando ACK de archivo: %s.\n", filename);
 }
 
 void send_file(int sock, const char *target_name, const char *filename)
@@ -143,8 +156,10 @@ void send_file(int sock, const char *target_name, const char *filename)
 
     // Enviar comando al servidor con el tamaño del archivo
     char command[BUFFER_SIZE];
-    snprintf(command, sizeof(command), "%s archivo %s %ld", target_name, filename, file_size);
-    send(sock, command, strlen(command), 0);
+    uint16_t opcode = htons(OPCODE_ARCH);
+    memcpy(command, &opcode, sizeof(opcode));
+    snprintf(command + 2, sizeof(command) - 2, "%s %s %ld", target_name, filename, file_size);
+    send(sock, command, sizeof(opcode) + strlen(command + 2), 0);
 
     printf("Se abrió el archivo: %s\n", filepath);
     char buffer[BUFFER_SIZE];
@@ -154,44 +169,25 @@ void send_file(int sock, const char *target_name, const char *filename)
     {
         printf("Bytes leídos: %zd\n", bytes_read);
         ssize_t bytes_sent = send(sock, buffer, bytes_read, 0);
-
         if (bytes_sent < 0)
         {
             perror("send");
             close(file_fd);
             return;
         }
-
         printf("Bytes enviados: %zd\n", bytes_sent);
     }
-
-    if (bytes_read < 0)
+    recv(sock, buffer, BUFFER_SIZE, 0);
+    int opcode2 = ntohs(*(uint16_t *)buffer);
+    if (opcode2 == OPCODE_ACK)
     {
-        perror("read");
+        printf("El archivo enviado con éxito.\n");
     }
     else
     {
-        printf("El archivo completo fue enviado.\n");
+        printf("No se recibió el ACK.\n");
     }
-
     close(file_fd);
-
-    // Enviar mensaje de finalización
-    const char *end_message = "END_OF_FILE";
-    send(sock, end_message, strlen(end_message), 0);
-
-    // Esperar la confirmación del servidor
-    char response[BUFFER_SIZE];
-    int bytes_received = recv(sock, response, sizeof(response) - 1, 0);
-    if (bytes_received > 0)
-    {
-        response[bytes_received] = '\0';
-        printf("Respuesta del servidor: %s\n", response);
-    }
-    else
-    {
-        perror("Error al recibir la confirmación del servidor");
-    }
 }
 
 int main(int argc, char *argv[])
@@ -256,20 +252,31 @@ int main(int argc, char *argv[])
         {
             if (sscanf(buffer, "%*s %*s %s", file_name) == 1)
             {
-                printf("target %s - file %s\n", target_name, file_name);
+                printf("Enviando a [%s] archivo: %s\n", target_name, file_name);
                 send_file(sock, target_name, file_name);
-                // Esperar confirmación del servidor
-                recv(sock, buffer, BUFFER_SIZE, 0);
-                printf("Respuesta del servidor: %s\n", buffer);
             }
             else
             {
                 printf("Formato incorrecto. Use: <Nombre> archivo <ruta_del_archivo>\n");
             }
         }
+        else if (sscanf(buffer, "%8s", command) == 1 && strcmp(command, "clientes") == 0)
+        {
+
+            // Enviar mensaje normal con OPCODE_MSJE
+            uint16_t opcode = htons(OPCODE_LIST);
+            char message[BUFFER_SIZE];
+            memcpy(message, &opcode, sizeof(opcode));
+            send(sock, message, sizeof(opcode), 0);
+        }
         else
         {
-            send(sock, buffer, strlen(buffer), 0);
+            // Enviar mensaje normal con OPCODE_MSJE
+            uint16_t opcode = htons(OPCODE_MSJE);
+            char message[BUFFER_SIZE];
+            memcpy(message, &opcode, sizeof(opcode));
+            strcpy(message + sizeof(opcode), buffer);
+            send(sock, message, sizeof(opcode) + strlen(buffer), 0);
         }
     }
 

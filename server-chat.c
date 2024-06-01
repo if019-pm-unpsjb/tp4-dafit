@@ -9,6 +9,11 @@
 #include <fcntl.h>
 
 #define PORT 8080
+#define OPCODE_MSJE 1
+#define OPCODE_ARCH 2
+#define OPCODE_LIST 3
+#define OPCODE_ACK 4
+#define OPCODE_ERROR 5
 #define BUFFER_SIZE 512
 #define FILEPATH_SIZE (BUFFER_SIZE + 14)
 #define BUFFER_ENVIADO 2048
@@ -58,12 +63,23 @@ int obtener_socket_destinatario(const char *target_nombre)
     return target_socket;
 }
 
+void send_ack(int sock, const char *filename)
+{
+    char ack[BUFFER_SIZE];
+    uint16_t opcode = htons(OPCODE_ACK);
+    memcpy(ack, &opcode, sizeof(opcode));
+    strcpy(ack + sizeof(opcode), filename);
+
+    send(sock, ack, sizeof(opcode) + strlen(filename) + 1, 0);
+    printf("Enviando ACK de archivo: %s.\n", filename);
+}
+
 void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
 {
-    char target_nombre[NOMBRE_SIZE + 1], command[BUFFER_SIZE], filename[BUFFER_SIZE];
+    char target_nombre[NOMBRE_SIZE + 1], filename[BUFFER_SIZE];
     long file_size;
 
-    if (sscanf(buffer2, "%4s %s %s %ld", target_nombre, command, filename, &file_size) != 4)
+    if (sscanf(buffer2 + 2, "%4s %s %ld", target_nombre, filename, &file_size) != 3)
     {
         const char *error_message = "Error en el formato del mensaje.\n";
         send(client_sock, error_message, strlen(error_message), 0);
@@ -80,10 +96,7 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
 
     printf("Reenviando archivo a: %s\n", target_nombre);
 
-    // Envía un mensaje al cliente para indicar que se enviará un archivo
-    char file_message[FILE_MESSAGE_SIZE];
-    snprintf(file_message, FILE_MESSAGE_SIZE, "FILE:%s %ld", filename, file_size);
-    send(target_socket, file_message, strlen(file_message), 0);
+    send(target_socket, buffer2, BUFFER_SIZE, 0);
 
     char buffer[BUFFER_SIZE];
     ssize_t bytes_received;
@@ -115,14 +128,9 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
         total_bytes_received += bytes_received;
     }
 
-    // Enviar señal de finalización de transferencia
-    send(target_socket, "END_OF_FILE", strlen("END_OF_FILE"), 0);
-
     if (total_bytes_received == file_size)
     {
-        printf("Archivo %s reenviado correctamente a %s.\n", filename, target_nombre);
-        const char *success_message = "Archivo recibido correctamente.\n";
-        send(client_sock, success_message, strlen(success_message), 0);
+        send_ack(client_sock, filename);
     }
     else
     {
@@ -132,19 +140,18 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
     }
 }
 
-
-void manejar_mensaje(int client_socket, const char *nombre, const char *buffer)
+void manejar_mensaje(int client_socket, const char* nombre, const char *buffer)
 {
     char target_nombre[NOMBRE_SIZE + 1];
-    sscanf(buffer, "%4s", target_nombre);
+    sscanf(buffer + 2, "%4s", target_nombre);
 
     int target_socket = obtener_socket_destinatario(target_nombre);
     if (target_socket != -1)
     {
         char message[BUFFER_SIZE];
-        snprintf(message, BUFFER_SIZE, "[%s]: %s", nombre, buffer + strlen(target_nombre) + 1);
+        snprintf(message, BUFFER_SIZE, "[%s]: %s", nombre, buffer + 2 + strlen(target_nombre) + 1);
         send(target_socket, message, strlen(message), 0);
-        printf("Mensaje enviado a %s: %s\n", target_nombre, buffer + strlen(target_nombre) + 1);
+        printf("Mensaje enviado de [%s] a [%s]: %s\n", nombre, target_nombre, buffer + 2 + strlen(target_nombre) + 1);
     }
     else
     {
@@ -174,17 +181,29 @@ void *handle_client(void *arg)
     {
         buffer[bytes_received] = '\0';
 
-        if (strcmp(buffer, "clientes") == 0)
+        int opcode = ntohs(*(uint16_t *)buffer);
+
+        switch (opcode)
         {
-            enviar_lista_de_clientes(client_socket);
-        }
-        else if (strstr(buffer, "archivo") != NULL)
-        {
-            manejar_archivo(client_socket, nombre, buffer);
-        }
-        else
-        {
+        case OPCODE_MSJE:
             manejar_mensaje(client_socket, nombre, buffer);
+            break;
+
+        case OPCODE_ARCH:
+            manejar_archivo(client_socket, nombre, buffer);
+            break;
+
+        case OPCODE_LIST:
+            enviar_lista_de_clientes(client_socket);
+            break;
+
+        case OPCODE_ACK:
+            printf("ACK recibido.\n");
+            break;
+
+        default:
+            const char *error_msg = "Código de operación incorrecto.\n";
+            send(client_socket, error_msg, strlen(error_msg), 0);
         }
     }
 
