@@ -167,7 +167,7 @@ void send_file(int sock, const char *target_name, const char *filename)
 
     while ((bytes_read = read(file_fd, buffer, BUFFER_SIZE)) > 0)
     {
-        printf("Bytes leídos: %zd\n", bytes_read);
+        //printf("Bytes leídos: %zd\n", bytes_read);
         ssize_t bytes_sent = send(sock, buffer, bytes_read, 0);
         if (bytes_sent < 0)
         {
@@ -175,7 +175,7 @@ void send_file(int sock, const char *target_name, const char *filename)
             close(file_fd);
             return;
         }
-        printf("Bytes enviados: %zd\n", bytes_sent);
+        //printf("Bytes enviados: %zd\n", bytes_sent);
     }
     recv(sock, buffer, BUFFER_SIZE, 0);
     int opcode2 = ntohs(*(uint16_t *)buffer);
