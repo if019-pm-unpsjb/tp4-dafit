@@ -14,9 +14,10 @@
 #define OPCODE_LIST 3
 #define OPCODE_ACK 4
 #define OPCODE_ERROR 5
-#define BUFFER_SIZE 512
+
+#define BUFFER_SIZE 2048
 #define FILEPATH_SIZE (BUFFER_SIZE + 14)
-#define BUFFER_ENVIADO 2048
+#define BUFFER_FILE 512
 #define FILE_MESSAGE_SIZE (BUFFER_SIZE + 10)
 #define NOMBRE_SIZE 4
 #define MAX_CLIENTS 10
@@ -76,7 +77,7 @@ void send_ack(int sock, const char *filename)
 
 void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
 {
-    char target_nombre[NOMBRE_SIZE + 1], filename[BUFFER_SIZE];
+    char target_nombre[NOMBRE_SIZE + 1], filename[BUFFER_FILE];
     long file_size;
 
     if (sscanf(buffer2 + 2, "%4s %s %ld", target_nombre, filename, &file_size) != 3)
