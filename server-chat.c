@@ -64,15 +64,16 @@ int obtener_socket_destinatario(const char *target_nombre)
     return target_socket;
 }
 
-void send_ack(int sock, const char *filename)
+void send_ack(const char *usuario, int target_sock, const char *filename)
 {
+    sleep(10);
     char ack[BUFFER_SIZE];
     uint16_t opcode = htons(OPCODE_ACK);
     memcpy(ack, &opcode, sizeof(opcode));
     strcpy(ack + sizeof(opcode), filename);
 
-    send(sock, ack, sizeof(opcode) + strlen(filename) + 1, 0);
-    printf("Enviando ACK de archivo: %s.\n", filename);
+    send(target_sock, ack, sizeof(opcode) + strlen(filename) + 1, 0);
+    printf("Enviando ACK a [%s] por archivo: %s.\n", usuario, filename);
 }
 
 void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
@@ -102,6 +103,7 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
     char buffer[BUFFER_SIZE];
     ssize_t bytes_received;
     long total_bytes_received = 0;
+    ssize_t bytes_sent = 0;
 
     while (total_bytes_received < file_size)
     {
@@ -119,7 +121,7 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
             break;
         }
 
-        ssize_t bytes_sent = send(target_socket, buffer, bytes_received, 0);
+        bytes_sent += send(target_socket, buffer, bytes_received, 0);
         if (bytes_sent == -1)
         {
             perror("send");
@@ -128,10 +130,38 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
 
         total_bytes_received += bytes_received;
     }
+    printf("Tamaño de archivo: %ld.\n", file_size);
+    printf("Bytes recibidos: %ld.\n", total_bytes_received);
+    printf("Bytes reenviados: %ld.\n", bytes_sent);
 
     if (total_bytes_received == file_size)
     {
-        send_ack(client_sock, filename);
+        while (1)
+        {
+            bytes_received = recv(target_socket, buffer, BUFFER_SIZE, 0);
+            if (bytes_received == -1)
+            {
+                perror("recv");
+                return;
+            }
+            else if (bytes_received == 0)
+            {
+                printf("El cliente cerró la conexión antes de recibir el ACK.\n");
+                return;
+            }
+
+            int opcode = ntohs(*(uint16_t *)buffer);
+            if (opcode == OPCODE_ACK)
+            {
+                send_ack(usuario, client_sock, filename); // Enviar el ACK al remitente (client_sock)
+                break;                                    // Salir del bucle una vez que se reciba el ACK
+            }
+            else
+            {
+                printf("Error: Se recibió un mensaje inesperado en lugar del ACK.\n");
+                break;
+            }
+        }
     }
     else
     {
@@ -141,7 +171,7 @@ void manejar_archivo(int client_sock, const char *usuario, const char *buffer2)
     }
 }
 
-void manejar_mensaje(int client_socket, const char* nombre, const char *buffer)
+void manejar_mensaje(int client_socket, const char *nombre, const char *buffer)
 {
     char target_nombre[NOMBRE_SIZE + 1];
     sscanf(buffer + 2, "%4s", target_nombre);
@@ -199,7 +229,7 @@ void *handle_client(void *arg)
             break;
 
         case OPCODE_ACK:
-            printf("ACK recibido.\n");
+            printf("ACK recibido fuera de lugar.\n");
             break;
 
         default:

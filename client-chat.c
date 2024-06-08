@@ -37,9 +37,15 @@ void *receive_messages(void *arg)
             char target_nombre[NOMBRE_SIZE + 1], filename[BUFFER_SIZE];
             long file_size;
 
-            if (sscanf(buffer + 2, "%4s %s %ld", target_nombre, filename, &file_size) != 3)
+            if (sscanf(buffer + 2, "%4s %s %ld", target_nombre, filename, &file_size) == 3)
+            {
                 printf("Archivo entrante: %s\n", filename);
-            recieve_file(sock, filename, file_size);
+                recieve_file(sock, filename, file_size);
+            }
+            else
+            {
+                printf("Error de formato del comando.\n");
+            }
         }
         else
         {
@@ -176,16 +182,26 @@ void send_file(int sock, const char *target_name, const char *filename)
         }
         printf("Bytes enviados: %zd\n", bytes_sent);
     }
-    recv(sock, buffer, BUFFER_SIZE, 0);
-    int opcode2 = ntohs(*(uint16_t *)buffer);
-    if (opcode2 == OPCODE_ACK)
+
+    // Esperar el ACK del servidor
+    ssize_t bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
+    if (bytes_received > 0)
     {
-        printf("El archivo enviado con éxito.\n");
+        int opcode2 = ntohs(*(uint16_t *)buffer);
+        if (opcode2 == OPCODE_ACK)
+        {
+            printf("El archivo enviado con éxito.\n");
+        }
+        else
+        {
+            printf("No se recibió el ACK.\n");
+        }
     }
     else
     {
-        printf("No se recibió el ACK.\n");
+        printf("Error al recibir el ACK.\n");
     }
+
     close(file_fd);
 }
 
