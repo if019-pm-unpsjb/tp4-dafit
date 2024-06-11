@@ -7,9 +7,11 @@
 #include <sys/sendfile.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #define BUFFER_SIZE 2048
 #define NOMBRE_SIZE 4
+#define PORT 8080
 
 #define OPCODE_MSJE 1
 #define OPCODE_ARCH 2
@@ -17,8 +19,11 @@
 #define OPCODE_ACK 4
 #define OPCODE_ERROR 5
 
+char target_ip[INET_ADDRSTRLEN];
+int target_port;
+
 void *receive_messages(void *arg);
-void recieve_file(int sock, const char *filename, long file_size);
+void receive_file(const char *client1_ip, int client1_port, const char *filename, long file_size);
 void send_file(int sock, const char *target_name, const char *filename);
 void send_ack(int sock, const char *filename);
 
@@ -36,11 +41,14 @@ void *receive_messages(void *arg)
         {
             char target_nombre[NOMBRE_SIZE + 1], filename[BUFFER_SIZE];
             long file_size;
+            int client1_port;
+            char client1_ip[INET_ADDRSTRLEN];
 
-            if (sscanf(buffer + 2, "%4s %s %ld", target_nombre, filename, &file_size) == 3)
+            printf("Recibido mensaje OPCODE_ARCH.\n"); 
+            if (sscanf(buffer + 2, "%4s %s %ld %d %s", target_nombre, filename, &file_size, &client1_port, client1_ip) == 5)
             {
-                printf("Archivo entrante: %s\n", filename);
-                recieve_file(sock, filename, file_size);
+                printf("Se quiere recibir el archivo: %s.\n", filename);
+                receive_file(client1_ip, client1_port, filename, file_size);
             }
             else
             {
@@ -61,8 +69,9 @@ void *receive_messages(void *arg)
     return NULL;
 }
 
-void recieve_file(int sock, const char *filename, long file_size)
+void receive_file(const char *client1_ip, int client1_port, const char *filename, long file_size)
 {
+    printf("Archivo entrante: %s\n", filename);
     char filepath[BUFFER_SIZE];
     snprintf(filepath, sizeof(filepath), "recibidos/%s", filename);
 
@@ -72,10 +81,38 @@ void recieve_file(int sock, const char *filename, long file_size)
     if (file_fd < 0)
     {
         perror("open");
-        const char *error_message = "No se pudo crear archivo.\n";
-        send(sock, error_message, strlen(error_message), 0);
         return;
     }
+
+    // Conectar con el cliente 1
+    int client1_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (client1_sock < 0)
+    {
+        perror("socket");
+        close(file_fd);
+        return;
+    }
+
+    struct sockaddr_in client1_addr;
+    client1_addr.sin_family = AF_INET;
+    client1_addr.sin_port = htons(client1_port);
+    if (inet_pton(AF_INET, client1_ip, &client1_addr.sin_addr) <= 0)
+    {
+        perror("inet_pton");
+        close(file_fd);
+        close(client1_sock);
+        return;
+    }
+
+    if (connect(client1_sock, (struct sockaddr *)&client1_addr, sizeof(client1_addr)) < 0)
+    {
+        perror("connect");
+        close(file_fd);
+        close(client1_sock);
+        return;
+    }
+
+    printf("Conectado con el cliente 1 (%s:%d).\n", client1_ip, client1_port);
 
     char buffer[BUFFER_SIZE];
     ssize_t bytes_received;
@@ -84,11 +121,12 @@ void recieve_file(int sock, const char *filename, long file_size)
 
     while (total_bytes_received < file_size)
     {
-        bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
+        bytes_received = recv(client1_sock, buffer, BUFFER_SIZE, 0);
         if (bytes_received == -1)
         {
             perror("recv");
             close(file_fd);
+            close(client1_sock);
             return;
         }
 
@@ -104,15 +142,19 @@ void recieve_file(int sock, const char *filename, long file_size)
         {
             perror("write");
             close(file_fd);
+            close(client1_sock);
             return;
         }
         total_bytes_received += bytes_received;
     }
+
     close(file_fd);
+    close(client1_sock);
+
     if (total_bytes_received == file_size)
     {
         printf("Se recibió correctamente el archivo: %s.\n", filename);
-        send_ack(sock, filename);
+        // Envía una confirmación al cliente 1 si es necesario
     }
     else
     {
@@ -159,50 +201,96 @@ void send_file(int sock, const char *target_name, const char *filename)
     }
     long file_size = file_stat.st_size;
 
-    // Enviar comando al servidor con el tamaño del archivo
+    // Crear un nuevo socket para escuchar conexiones entrantes
+    int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_sock < 0)
+    {
+        perror("socket");
+        close(file_fd);
+        return;
+    }
+
+    struct sockaddr_in listen_addr;
+    listen_addr.sin_family = AF_INET;
+    listen_addr.sin_addr.s_addr = INADDR_ANY;
+    listen_addr.sin_port = htons(8081); // Puerto para escuchar
+
+    if (bind(listen_sock, (struct sockaddr *)&listen_addr, sizeof(listen_addr)) < 0)
+    {
+        perror("bind");
+        close(file_fd);
+        close(listen_sock);
+        return;
+    }
+
+    if (listen(listen_sock, 1) < 0)
+    {
+        perror("listen");
+        close(file_fd);
+        close(listen_sock);
+        return;
+    }
+
+    // Obtener la dirección IP del cliente
+    struct sockaddr_in client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+    if (getsockname(sock, (struct sockaddr *)&client_addr, &addr_len) != 0)
+    {
+        perror("Error al obtener la información del cliente");
+        close(file_fd);
+        close(listen_sock);
+        return;
+    }
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
+
+    // Enviar comando al servidor para iniciar P2P
+    printf("Enviando paquete de envío de archivo.\n");
     char command[BUFFER_SIZE];
     uint16_t opcode = htons(OPCODE_ARCH);
     memcpy(command, &opcode, sizeof(opcode));
-    snprintf(command + 2, sizeof(command) - 2, "%s %s %ld", target_name, filename, file_size);
+    snprintf(command + 2, sizeof(command) - 2, "%s %s %ld %d %s", target_name, filename, file_size, ntohs(listen_addr.sin_port), client_ip);
     send(sock, command, sizeof(opcode) + strlen(command + 2), 0);
 
-    printf("Se abrió el archivo: %s\n", filepath);
+    printf("Esperando conexión del destinatario en el puerto %d.\n", ntohs(listen_addr.sin_port));
+
+    // Esperar la conexión del cliente 2
+    struct sockaddr_in client2_addr;
+    socklen_t client2_addr_len = sizeof(client2_addr);
+    int client2_sock = accept(listen_sock, (struct sockaddr *)&client2_addr, &client2_addr_len);
+    if (client2_sock < 0)
+    {
+        perror("Error en accept");
+        close(file_fd);
+        close(listen_sock);
+        return;
+    }
+    printf("Conexión aceptada desde %s:%d.\n", inet_ntoa(client2_addr.sin_addr), ntohs(client2_addr.sin_port));
+
+    printf("Iniciando transferencia del archivo...\n");
+
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read;
 
     while ((bytes_read = read(file_fd, buffer, BUFFER_SIZE)) > 0)
     {
-        printf("Bytes leídos: %zd\n", bytes_read);
-        ssize_t bytes_sent = send(sock, buffer, bytes_read, 0);
+        ssize_t bytes_sent = send(client2_sock, buffer, bytes_read, 0);
         if (bytes_sent < 0)
         {
             perror("send");
             close(file_fd);
+            close(client2_sock);
+            close(listen_sock);
             return;
         }
         printf("Bytes enviados: %zd\n", bytes_sent);
     }
 
-    // Esperar el ACK del servidor
-    ssize_t bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
-    if (bytes_received > 0)
-    {
-        int opcode2 = ntohs(*(uint16_t *)buffer);
-        if (opcode2 == OPCODE_ACK)
-        {
-            printf("El archivo enviado con éxito.\n");
-        }
-        else
-        {
-            printf("No se recibió el ACK.\n");
-        }
-    }
-    else
-    {
-        printf("Error al recibir el ACK.\n");
-    }
-
     close(file_fd);
+    close(client2_sock);
+    close(listen_sock);
+
+    printf("Transferencia del archivo completada.\n");
 }
 
 int main(int argc, char *argv[])
@@ -214,24 +302,24 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    int sock = 0;
-    struct sockaddr_in serv_addr;
-    char buffer[BUFFER_SIZE];
+    strncpy(target_ip, argv[1], INET_ADDRSTRLEN);
+    target_port = atoi(argv[2]);
     char nombre[NOMBRE_SIZE + 1];
-
     strncpy(nombre, argv[3], NOMBRE_SIZE);
     nombre[NOMBRE_SIZE] = '\0';
 
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0)
     {
         perror("Error al crear el socket");
         return -1;
     }
 
+    struct sockaddr_in serv_addr;
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(atoi(argv[2]));
+    serv_addr.sin_port = htons(target_port);
 
-    if (inet_pton(AF_INET, argv[1], (void *)&serv_addr.sin_addr) <= 0)
+    if (inet_pton(AF_INET, target_ip, &serv_addr.sin_addr) <= 0)
     {
         perror("Dirección inválida o no soportada");
         close(sock);
@@ -255,8 +343,9 @@ int main(int argc, char *argv[])
 
     while (1)
     {
+        char buffer[BUFFER_SIZE];
         fgets(buffer, BUFFER_SIZE, stdin);
-        buffer[strcspn(buffer, "\n")] = 0; // Eliminar el salto de línea
+        buffer[strcspn(buffer, "\n")] = '\0'; // Eliminar el salto de línea
 
         // Buscar el comando "archivo" después del nombre del destinatario
         char target_name[NOMBRE_SIZE + 1];
@@ -277,8 +366,7 @@ int main(int argc, char *argv[])
         }
         else if (sscanf(buffer, "%8s", command) == 1 && strcmp(command, "clientes") == 0)
         {
-
-            // Enviar mensaje normal con OPCODE_MSJE
+            // Enviar mensaje normal con OPCODE_LIST
             uint16_t opcode = htons(OPCODE_LIST);
             char message[BUFFER_SIZE];
             memcpy(message, &opcode, sizeof(opcode));
@@ -294,7 +382,6 @@ int main(int argc, char *argv[])
             send(sock, message, sizeof(opcode) + strlen(buffer), 0);
         }
     }
-
     close(sock);
     return 0;
 }

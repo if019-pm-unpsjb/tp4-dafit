@@ -2,6 +2,8 @@
     "C_Cpp.errorSquiggles": "disabled",
     "files.associations": {
         "inet.h": "c",
-        "select.h": "c"
+        "select.h": "c",
+        "pthread.h": "c",
+        "unistd.h": "c"
     }
 }
