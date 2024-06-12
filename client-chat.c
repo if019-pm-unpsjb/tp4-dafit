@@ -210,10 +210,13 @@ void send_file(int sock, const char *target_name, const char *filename)
         return;
     }
 
+    int opt = 1;
+    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
     struct sockaddr_in listen_addr;
     listen_addr.sin_family = AF_INET;
     listen_addr.sin_addr.s_addr = INADDR_ANY;
-    listen_addr.sin_port = htons(8081); // Puerto para escuchar
+    listen_addr.sin_port = htons(8081); // Puerto dinámico
 
     if (bind(listen_sock, (struct sockaddr *)&listen_addr, sizeof(listen_addr)) < 0)
     {
