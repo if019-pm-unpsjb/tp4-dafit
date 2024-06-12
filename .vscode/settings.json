@@ -4,6 +4,7 @@
         "inet.h": "c",
         "select.h": "c",
         "pthread.h": "c",
-        "unistd.h": "c"
+        "unistd.h": "c",
+        "types.h": "c"
     }
 }

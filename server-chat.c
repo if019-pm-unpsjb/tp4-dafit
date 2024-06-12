@@ -66,24 +66,21 @@ int obtener_socket_destinatario(const char *target_nombre)
 
 void manejar_archivo(int client_socket, const char *buffer)
 {
-    char target_name[NOMBRE_SIZE + 1];
-    char received_filename[BUFFER_FILE];
+    char target_name[NOMBRE_SIZE + 1], sender_name[NOMBRE_SIZE+1];
+    char filename[BUFFER_FILE];
     long file_size;
     int client1_port;
     char client1_ip[INET_ADDRSTRLEN];
 
-    // Verificar el contenido del buffer recibido
-    printf("Buffer recibido en manejar_archivo: %s\n", buffer);
-
     // Asegurarse de que sscanf funciona correctamente
-    if (sscanf(buffer + 2, "%4s %s %ld %d %s", target_name, received_filename, &file_size, &client1_port, client1_ip) != 5)
+    if (sscanf(buffer + 2, "%4s %s %s %ld %d %s", sender_name, target_name, filename, &file_size, &client1_port, client1_ip) != 6)
     {
         const char *error_message = "Error en el formato del mensaje.\n";
         send(client_socket, error_message, strlen(error_message), 0);
         return;
     }
 
-    printf("Pedido de enviar archivo a %s desde %s:%d.\n", target_name, client1_ip, client1_port);
+    printf("Pedido de [%s] a [%s] de enviar archivo: %s.\n", sender_name, target_name, filename);
 
     int target_socket = obtener_socket_destinatario(target_name);
 
@@ -94,19 +91,18 @@ void manejar_archivo(int client_socket, const char *buffer)
     }
     else
     {
-        // Verificar el contenido del buffer antes de enviarlo al cliente 2
-        printf("Enviando buffer a cliente objetivo (socket %d): %s\n", target_socket, buffer);
+        //printf("Enviando buffer a cliente objetivo (socket %d): %s\n", target_socket, buffer);
         char command[BUFFER_SIZE];
         uint16_t opcode = htons(OPCODE_ARCH);
         memcpy(command, &opcode, sizeof(opcode));
-        snprintf(command + 2, sizeof(command) - 2, "%s %s %ld %d %s", target_name, received_filename, file_size, client1_port, client1_ip);
+        snprintf(command + 2, sizeof(command) - 2, " %s %s %s %ld %d %s", sender_name, target_name, filename, file_size, client1_port, client1_ip);
         // Enviar mensaje con opcode OPCODE_ARCH al cliente 2
         if (send(target_socket, command, sizeof(opcode) + strlen(command + 2), 0) == -1)
         {
-            perror("Error enviando datos al cliente 2");
+            printf("Error enviando datos de conexión P2P a [%s].\n", target_name);
         }
 
-        printf("Información de conexión P2P enviada al cliente 2.\n");
+        printf("Información de conexión P2P enviada a [%s].\n", target_name);
     }
 }
 
@@ -151,7 +147,6 @@ void *handle_client(void *arg)
     {
         buffer[bytes_received] = '\0';
         int opcode = ntohs(*(uint16_t *)buffer);
-        printf("Opcode recibido: %d\n", opcode); // Mensaje de depuración
 
         switch (opcode)
         {
@@ -160,7 +155,6 @@ void *handle_client(void *arg)
             break;
 
         case OPCODE_ARCH:
-            printf("Recibí pedido de envío de archivo.\n");
             manejar_archivo(client_socket, buffer);
             break;
 
@@ -224,14 +218,14 @@ int main()
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
     {
-        perror("Error en bind");
+        perror("bind");
         close(server_fd);
         exit(EXIT_FAILURE);
     }
 
     if (listen(server_fd, 3) < 0)
     {
-        perror("Error en listen");
+        perror("listen");
         close(server_fd);
         exit(EXIT_FAILURE);
     }
@@ -242,7 +236,7 @@ int main()
     {
         if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
         {
-            perror("Error en accept");
+            perror("accept");
             close(server_fd);
             exit(EXIT_FAILURE);
         }

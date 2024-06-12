@@ -24,7 +24,7 @@ int target_port;
 
 void *receive_messages(void *arg);
 void receive_file(const char *client1_ip, int client1_port, const char *filename, long file_size);
-void send_file(int sock, const char *target_name, const char *filename);
+void send_file(int sock, const char *nombre, const char *target_name, const char *filename);
 void send_ack(int sock, const char *filename);
 
 void *receive_messages(void *arg)
@@ -39,15 +39,15 @@ void *receive_messages(void *arg)
         int opcode = ntohs(*(uint16_t *)buffer);
         if (opcode == OPCODE_ARCH)
         {
-            char target_nombre[NOMBRE_SIZE + 1], filename[BUFFER_SIZE];
+            char target_nombre[NOMBRE_SIZE + 1], remitente_nombre[NOMBRE_SIZE + 1], filename[BUFFER_SIZE];
             long file_size;
             int client1_port;
             char client1_ip[INET_ADDRSTRLEN];
 
-            printf("Recibido mensaje OPCODE_ARCH.\n"); 
-            if (sscanf(buffer + 2, "%4s %s %ld %d %s", target_nombre, filename, &file_size, &client1_port, client1_ip) == 5)
+            //printf("Recibido mensaje OPCODE_ARCH.\n");
+            if (sscanf(buffer + 2, "%4s %s %s %ld %d %s", remitente_nombre, target_nombre, filename, &file_size, &client1_port, client1_ip) == 6)
             {
-                printf("Se quiere recibir el archivo: %s.\n", filename);
+                printf("[%s] quiere enviarte el archivo: %s.\n", remitente_nombre, filename);
                 receive_file(client1_ip, client1_port, filename, file_size);
             }
             else
@@ -71,11 +71,11 @@ void *receive_messages(void *arg)
 
 void receive_file(const char *client1_ip, int client1_port, const char *filename, long file_size)
 {
-    printf("Archivo entrante: %s\n", filename);
+    //printf("Archivo entrante: %s\n", filename);
     char filepath[BUFFER_SIZE];
     snprintf(filepath, sizeof(filepath), "recibidos/%s", filename);
 
-    printf("Creando archivo: %s\n", filepath);
+    //printf("Creando archivo: %s\n", filepath);
     int file_fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 
     if (file_fd < 0)
@@ -112,12 +112,12 @@ void receive_file(const char *client1_ip, int client1_port, const char *filename
         return;
     }
 
-    printf("Conectado con el cliente 1 (%s:%d).\n", client1_ip, client1_port);
+    //printf("Conectado con el cliente 1 (%s:%d).\n", client1_ip, client1_port);
 
     char buffer[BUFFER_SIZE];
     ssize_t bytes_received;
     long total_bytes_received = 0;
-    printf("Recibiendo datos:\n");
+    printf("Recibiendo datos...\n");
 
     while (total_bytes_received < file_size)
     {
@@ -148,18 +148,17 @@ void receive_file(const char *client1_ip, int client1_port, const char *filename
         total_bytes_received += bytes_received;
     }
 
-    close(file_fd);
-    close(client1_sock);
-
     if (total_bytes_received == file_size)
     {
-        printf("Se recibió correctamente el archivo: %s.\n", filename);
-        // Envía una confirmación al cliente 1 si es necesario
+        //printf("Se recibió correctamente el archivo: %s.\n", filename);
+        send_ack(client1_sock, filename);
     }
     else
     {
         printf("Error: Se recibieron %ld bytes, pero se esperaba %ld bytes.\n", total_bytes_received, file_size);
     }
+    close(file_fd);
+    close(client1_sock);
 }
 
 void send_ack(int sock, const char *filename)
@@ -170,12 +169,12 @@ void send_ack(int sock, const char *filename)
     strcpy(ack + sizeof(opcode), filename);
 
     send(sock, ack, sizeof(opcode) + strlen(filename) + 1, 0);
-    printf("Enviando ACK de archivo: %s.\n", filename);
+    printf("Enviando confirmación de recepción de archivo: %s.\n", filename);
 }
 
-void send_file(int sock, const char *target_name, const char *filename)
+void send_file(int sock, const char *nombre, const char *target_name, const char *filename)
 {
-    printf("Ruta del archivo a enviar: %s\n", filename);
+    //printf("Ruta del archivo a enviar: %s\n", filename);
 
     char filepath[BUFFER_SIZE];
     snprintf(filepath, sizeof(filepath), "client_files/%s", filename);
@@ -248,14 +247,14 @@ void send_file(int sock, const char *target_name, const char *filename)
     inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
 
     // Enviar comando al servidor para iniciar P2P
-    printf("Enviando paquete de envío de archivo.\n");
+    //printf("Enviando paquete de envío de archivo.\n");
     char command[BUFFER_SIZE];
     uint16_t opcode = htons(OPCODE_ARCH);
     memcpy(command, &opcode, sizeof(opcode));
-    snprintf(command + 2, sizeof(command) - 2, "%s %s %ld %d %s", target_name, filename, file_size, ntohs(listen_addr.sin_port), client_ip);
+    snprintf(command + 2, sizeof(command) - 2, "%s %s %s %ld %d %s", nombre, target_name, filename, file_size, ntohs(listen_addr.sin_port), client_ip);
     send(sock, command, sizeof(opcode) + strlen(command + 2), 0);
 
-    printf("Esperando conexión del destinatario en el puerto %d.\n", ntohs(listen_addr.sin_port));
+    printf("Esperando conexión de [%s] en el puerto %d.\n", target_name, ntohs(listen_addr.sin_port));
 
     // Esperar la conexión del cliente 2
     struct sockaddr_in client2_addr;
@@ -268,7 +267,7 @@ void send_file(int sock, const char *target_name, const char *filename)
         close(listen_sock);
         return;
     }
-    printf("Conexión aceptada desde %s:%d.\n", inet_ntoa(client2_addr.sin_addr), ntohs(client2_addr.sin_port));
+    //printf("Conexión aceptada desde %s:%d.\n", inet_ntoa(client2_addr.sin_addr), ntohs(client2_addr.sin_port));
 
     printf("Iniciando transferencia del archivo...\n");
 
@@ -286,14 +285,31 @@ void send_file(int sock, const char *target_name, const char *filename)
             close(listen_sock);
             return;
         }
-        printf("Bytes enviados: %zd\n", bytes_sent);
+        //printf("Bytes enviados: %zd\n", bytes_sent);
+    }
+
+    // Esperar el ACK del servidor
+    ssize_t bytes_received = recv(client2_sock, buffer, BUFFER_SIZE, 0);
+    if (bytes_received > 0)
+    {
+        int opcode2 = ntohs(*(uint16_t *)buffer);
+        if (opcode2 == OPCODE_ACK)
+        {
+            printf("Se recibió confirmación de recepción.\n");
+        }
+        else
+        {
+            printf("No se recibió el ACK.\n");
+        }
+    }
+    else
+    {
+        printf("Error al recibir el ACK.\n");
     }
 
     close(file_fd);
     close(client2_sock);
     close(listen_sock);
-
-    printf("Transferencia del archivo completada.\n");
 }
 
 int main(int argc, char *argv[])
@@ -336,7 +352,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    printf("Conectado al servidor\n");
+    printf("Conectado al chat MSRP\n");
 
     // Enviar el nombre al servidor
     send(sock, nombre, strlen(nombre), 0);
@@ -360,7 +376,7 @@ int main(int argc, char *argv[])
             if (sscanf(buffer, "%*s %*s %s", file_name) == 1)
             {
                 printf("Enviando a [%s] archivo: %s\n", target_name, file_name);
-                send_file(sock, target_name, file_name);
+                send_file(sock, nombre, target_name, file_name);
             }
             else
             {
